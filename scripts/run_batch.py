@@ -52,21 +52,32 @@ def get_matches():
         return []
 
 def scrape_match(url, index, total):
-    """Executa o scraper para um único jogo."""
-    logger.info(f"[{index}/{total}] Iniciando scraping: {url}")
+    """Executa o scraper para um único jogo com Retry."""
+    max_retries = 3
     
-    try:
-        # Import local para evitar problemas de escopo/path se importado no topo
-        from scripts.scraper import OgolScraper
+    for attempt in range(1, max_retries + 1):
+        if attempt > 1:
+            logger.info(f"[{index}/{total}] Retentando {url} (Tentativa {attempt}/{max_retries})...")
+        else:
+            logger.info(f"[{index}/{total}] Iniciando scraping: {url}")
         
-        # Cria nova instância para cada thread (Playwright sync API suporte isso)
-        scraper = OgolScraper(headless=True, detailed=True)
-        data = scraper.scrape(url)
-        return data
+        try:
+            # Import local para evitar problemas de escopo/path se importado no topo
+            from scripts.scraper import OgolScraper
+            
+            # Cria nova instância para cada thread
+            scraper = OgolScraper(headless=True, detailed=True)
+            data = scraper.scrape(url)
+            return data
 
-    except Exception as e:
-        logger.error(f"Erro ao processar {url}: {e}")
-        return None
+        except Exception as e:
+            logger.warning(f"Erro na tentativa {attempt} para {url}: {e}")
+            if attempt < max_retries:
+                wait_time = 5 * attempt
+                time.sleep(wait_time)  # Backoff: 5s, 10s...
+            else:
+                logger.error(f"Falha definitiva após {max_retries} tentativas: {url}")
+                return None
 
 def main():
     start_time = datetime.now()
@@ -114,7 +125,7 @@ def main():
     logger.info(f"Iniciando processamento PARALELO de {len(urls)} jogos restantes (max_workers=3)...")
 
     # 3. Processar em Paralelo
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=2) as executor:
         # Submit tasks
         future_to_url = {
             executor.submit(scrape_match, url, i, total_urls): url
