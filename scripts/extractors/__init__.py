@@ -7,6 +7,7 @@ from .statistics import extract_statistics
 from .events import extract_events
 from .lineups import extract_lineups
 from .player_ratings import extract_player_ratings
+from .player_detailed_stats import extract_player_detailed_stats
 
 __all__ = [
     'extract_match_info', 
@@ -14,4 +15,5 @@ __all__ = [
     'extract_events', 
     'extract_lineups',
     'extract_player_ratings',
+    'extract_player_detailed_stats',
 ]

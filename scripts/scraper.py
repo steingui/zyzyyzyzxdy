@@ -7,7 +7,8 @@ Campos não encontrados são retornados como null (flexibilidade).
 
 Uso:
     python3 scraper.py <URL>
-    python3 scraper.py <URL> --no-headless  # Para debug visual
+    python3 scraper.py <URL> --no-headless    # Para debug visual
+    python3 scraper.py <URL> --detailed       # Inclui stats detalhadas de cada jogador
 
 Exemplo:
     python3 scraper.py "https://www.ogol.com.br/jogo/2024-04-13-palmeiras-sao-paulo/12345"
@@ -45,6 +46,7 @@ from scripts.extractors import (
     extract_events,
     extract_lineups,
     extract_player_ratings,
+    extract_player_detailed_stats,
 )
 from scripts.utils.browser import remove_ads, scroll_to_top
 
@@ -68,14 +70,16 @@ logger = logging.getLogger(__name__)
 class OgolScraper:
     """Scraper para ogol.com.br - extrai estatísticas de partidas do Brasileirão."""
     
-    def __init__(self, headless: bool = True) -> None:
+    def __init__(self, headless: bool = True, detailed: bool = False) -> None:
         """
         Inicializa o scraper.
         
         Args:
             headless: Se True, roda o browser sem interface gráfica
+            detailed: Se True, extrai stats detalhadas de cada jogador (mais lento)
         """
         self.headless = headless
+        self.detailed = detailed
         self.data: Dict[str, Any] = {}
     
     def scrape(self, url: str) -> Dict[str, Any]:
@@ -161,6 +165,13 @@ class OgolScraper:
                 if ratings:
                     self.data.update(ratings)
                 
+                # 7. Stats detalhadas de cada jogador (opcional, lento)
+                if self.detailed:
+                    logger.info("Extraindo stats detalhadas de jogadores (22 modais)...")
+                    detailed_stats = extract_player_detailed_stats(page)
+                    if detailed_stats:
+                        self.data.update(detailed_stats)
+                
                 logger.info(f"Scraping concluído: {self.data.get('home_team', '?')} x {self.data.get('away_team', '?')}")
                 
             except PlaywrightTimeout as e:
@@ -178,14 +189,18 @@ class OgolScraper:
 def main() -> None:
     """Ponto de entrada principal."""
     if len(sys.argv) < 2:
-        print("Uso: python3 scraper.py <URL>", file=sys.stderr)
+        print("Uso: python3 scraper.py <URL> [opções]", file=sys.stderr)
+        print("Opções:", file=sys.stderr)
+        print("  --no-headless  Mostra o browser (debug)", file=sys.stderr)
+        print("  --detailed     Extrai stats detalhadas de cada jogador (lento)", file=sys.stderr)
         print("Exemplo: python3 scraper.py 'https://www.ogol.com.br/jogo/...'", file=sys.stderr)
         sys.exit(1)
     
     url = sys.argv[1]
     headless = '--no-headless' not in sys.argv
+    detailed = '--detailed' in sys.argv
     
-    scraper = OgolScraper(headless=headless)
+    scraper = OgolScraper(headless=headless, detailed=detailed)
     data = scraper.scrape(url)
     
     # Validação mínima flexível
