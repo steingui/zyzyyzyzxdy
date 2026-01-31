@@ -1,0 +1,16 @@
+# Dependências Python - Brasileirão 2026
+
+# Web Scraping
+playwright>=1.40.0
+
+# PostgreSQL
+psycopg2-binary>=2.9.9
+
+# Variáveis de ambiente
+python-dotenv>=1.0.0
+
+# Validação de dados (opcional)
+pydantic>=2.5.0
+
+# Logging estruturado (opcional)
+structlog>=24.1.0

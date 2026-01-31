@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  # Banco de dados PostgreSQL
+  db:
+    image: postgres:16-alpine
+    container_name: brasileirao-db
+    environment:
+      POSTGRES_USER: brasileirao
+      POSTGRES_PASSWORD: brasileirao2026
+      POSTGRES_DB: brasileirao_2026
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./data/create_database.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U brasileirao -d brasileirao_2026" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - brasileirao-net
+
+  # Scraper
+  scraper:
+    build: .
+    container_name: brasileirao-scraper
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://brasileirao:brasileirao2026@db:5432/brasileirao_2026
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    networks:
+      - brasileirao-net
+    # Comando para processar rodada específica
+    # command: ["python3", "scripts/main.py", "--rodada", "1"]
+
+volumes:
+  postgres_data:
+
+
+networks:
+  brasileirao-net:
+    driver: bridge

@@ -1,0 +1,1 @@
+- always think with divide and conquer

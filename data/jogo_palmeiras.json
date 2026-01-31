@@ -1,0 +1,39 @@
+{
+  "home_team": "Estatísticas e Escalações Atlético Mineiro",
+  "away_team": "Palmeiras",
+  "rodada": 6,
+  "data_hora": "30/01 - 14:00",
+  "estadio": {
+    "nome": "ESTÁDIO"
+  },
+  "arbitro": {
+    "nome": "ÁRBITRO"
+  },
+  "url_fonte": "https://www.ogol.com.br/jogo/2026-01-28-atletico-mineiro-palmeiras/11860784",
+  "stats_home": {
+    "posse": 52,
+    "chutes_gol": 843566,
+    "escanteios": 900,
+    "faltas": 523318,
+    "impedimentos": 4,
+    "defesas_goleiro": 612377,
+    "xg": 3.74
+  },
+  "stats_away": {
+    "posse": 50,
+    "chutes_gol": 35,
+    "escanteios": 12,
+    "faltas": 33,
+    "impedimentos": 4,
+    "defesas_goleiro": 23,
+    "xg": 1.4
+  },
+  "escalacao_casa": {
+    "titulares": [],
+    "reservas": []
+  },
+  "escalacao_fora": {
+    "titulares": [],
+    "reservas": []
+  }
+}

@@ -1,0 +1,76 @@
+2026-01-30 23:37:27,355 - INFO - Iniciando scraping: https://www.ogol.com.br/jogo/2026-01-28-atletico-mineiro-palmeiras/11860784
+2026-01-30 23:38:04,222 - WARNING - Erro ao extrair eventos: ElementHandle.click: Timeout 30000ms exceeded.
+Call log:
+  - attempting click action
+    2 × waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <iframe name="" width="970" height="90" tabindex="0" scrolling="no" frameborder="0" marginwidth="0" marginheight="0" data-is-safeframe="true" data-load-complete="true" aria-label="Advertisement" title="3rd party ad content" data-google-container-id="2" id="google_ads_iframe_/8804/parceiros/ogol/anchor_0" allow="private-state-token-redemption;attribution-reporting" src="https://aba9f475b600f82ed7366a7258976506.safeframe.googlesyndication.com/safeframe/1-0-45/html/container.html" sandbox="allow-forms al…></iframe> from <div class="up-floating">…</div> subtree intercepts pointer events
+    - retrying click action
+    - waiting 20ms
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - <img alt="img-inter" id="clever-95112-1986402-Offerwall-img" src="https://assets.cleverwebserver.com/Pixel.gif"/> from <div class="clever-core-ads" id="clever-95112-1986402-Offerwall">…</div> subtree intercepts pointer events
+  2 × retrying click action
+      - waiting 100ms
+      - waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <div id="clever-95112-1986402-Offerwall-overlay"></div> intercepts pointer events
+  12 × retrying click action
+       - waiting 500ms
+       - waiting for element to be visible, enabled and stable
+       - element is visible, enabled and stable
+       - scrolling into view if needed
+       - done scrolling
+       - <iframe name="" width="970" height="90" tabindex="0" scrolling="no" frameborder="0" marginwidth="0" marginheight="0" data-is-safeframe="true" data-load-complete="true" aria-label="Advertisement" title="3rd party ad content" data-google-container-id="2" id="google_ads_iframe_/8804/parceiros/ogol/anchor_0" allow="private-state-token-redemption;attribution-reporting" src="https://aba9f475b600f82ed7366a7258976506.safeframe.googlesyndication.com/safeframe/1-0-45/html/container.html" sandbox="allow-forms al…></iframe> from <div class="up-floating">…</div> subtree intercepts pointer events
+     - retrying click action
+       - waiting 500ms
+       - waiting for element to be visible, enabled and stable
+       - element is visible, enabled and stable
+       - scrolling into view if needed
+       - done scrolling
+       - <img alt="img-inter" id="clever-95112-1986402-Offerwall-img" src="https://assets.cleverwebserver.com/Pixel.gif"/> from <div class="clever-core-ads" id="clever-95112-1986402-Offerwall">…</div> subtree intercepts pointer events
+     - retrying click action
+       - waiting 500ms
+       - waiting for element to be visible, enabled and stable
+       - element is visible, enabled and stable
+       - scrolling into view if needed
+       - done scrolling
+       - <div id="clever-95112-1986402-Offerwall-overlay"></div> intercepts pointer events
+     - retrying click action
+       - waiting 500ms
+       - waiting for element to be visible, enabled and stable
+       - element is visible, enabled and stable
+       - scrolling into view if needed
+       - done scrolling
+       - <div id="clever-95112-1986402-Offerwall-overlay"></div> intercepts pointer events
+  - retrying click action
+    - waiting 500ms
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - <iframe name="" width="970" height="90" tabindex="0" scrolling="no" frameborder="0" marginwidth="0" marginheight="0" data-is-safeframe="true" data-load-complete="true" aria-label="Advertisement" title="3rd party ad content" data-google-container-id="2" id="google_ads_iframe_/8804/parceiros/ogol/anchor_0" allow="private-state-token-redemption;attribution-reporting" src="https://aba9f475b600f82ed7366a7258976506.safeframe.googlesyndication.com/safeframe/1-0-45/html/container.html" sandbox="allow-forms al…></iframe> from <div class="up-floating">…</div> subtree intercepts pointer events
+  - retrying click action
+    - waiting 500ms
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - <img alt="img-inter" id="clever-95112-1986402-Offerwall-img" src="https://assets.cleverwebserver.com/Pixel.gif"/> from <div class="clever-core-ads" id="clever-95112-1986402-Offerwall">…</div> subtree intercepts pointer events
+  - retrying click action
+    - waiting 500ms
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - <div id="clever-95112-1986402-Offerwall-overlay"></div> intercepts pointer events
+  - retrying click action
+    - waiting 500ms
+
+2026-01-30 23:38:04,240 - INFO - Scraping concluído: Estatísticas e Escalações Atlético Mineiro x Palmeiras
