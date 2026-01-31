@@ -17,6 +17,16 @@ from pathlib import Path
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# Imports locais (assumindo execução da raiz ou pythonpath configurado)
+try:
+    from scripts.utils.normalization import normalize_match_data
+    from scripts.db_importer import process_input
+except ImportError:
+    # Fallback se rodar de dentro de scripts/
+    sys.path.append(str(Path(__file__).parent.parent))
+    from scripts.utils.normalization import normalize_match_data
+    from scripts.db_importer import process_input
+
 # Configuração
 SCRIPTS_DIR = Path(__file__).parent
 OUTPUT_FILE = Path("rodada_atual_full.json")
@@ -140,6 +150,20 @@ def main():
                     results["games"].append(data)
                     success_count += 1
                     logger.info(f"Sucesso: {url}")
+                    
+                    # 4. Normalização e Persistência no Banco
+                    try:
+                        logger.info(f"Normalizando e salvando no Banco de Dados: {url}")
+                        normalized_data = normalize_match_data(data)
+                        db_success = process_input(normalized_data)
+                        if db_success:
+                            logger.info(f"✅ DB Insert OK: {url}")
+                        else:
+                            logger.error(f"❌ DB Insert FALHOU: {url}")
+                    except Exception as e:
+                        logger.error(f"❌ Erro crítico ao salvar no banco (continuando batch): {e}")
+
+                    # Salvamento Incremental (JSON Backup)
                     
                     # Salvamento Incremental (Thread-safe aqui na main thread)
                     try:

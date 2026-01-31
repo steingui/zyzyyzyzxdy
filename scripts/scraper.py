@@ -137,19 +137,34 @@ class OgolScraper:
                 stats = extract_statistics(page)
                 self.data.update(stats)
                 
-                # 3. Scroll para seção de escalações e eventos
-                for y in LINEUP_SCROLL_RANGE:
-                    page.evaluate(f'window.scrollTo(0, {y})')
-                    page.wait_for_timeout(SCROLL_DELAY)
-                    remove_ads(page)
+                # 3. Smart Scroll para seções críticas (Lineups e Eventos)
+                # Em vez de scroll cego, vamos garantir que elementos alvo estejam visíveis
+                target_selectors = [
+                    '.zz-container #game_report',  # Escalações (Layout Novo)
+                    '.zz-module.game_matchup',     # Escalações (Layout Antigo)
+                    '.match-header-scorers',       # Gols
+                    '#event_summary'               # Eventos gerais
+                ]
                 
-                # Tentar esperar pelo container de escalações
-                try:
-                    page.wait_for_selector('.zz-module.game_matchup, .game_matchup', timeout=ELEMENT_WAIT_TIMEOUT)
-                except Exception:
-                    pass
+                logger.info("Executando Smart Scroll para carregar seções...")
+                for selector in target_selectors:
+                    try:
+                        # Tenta localizar mas não falha se não existir (layout dinâmico)
+                        loc = page.locator(selector).first
+                        if loc.is_visible():
+                            loc.scroll_into_view_if_needed()
+                            page.wait_for_timeout(SCROLL_DELAY)
+                    except Exception:
+                        pass
                 
+                # Scroll final para o fundo para garantir footer/ads/scripts finais
+                page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
                 page.wait_for_timeout(STABILIZATION_WAIT)
+                remove_ads(page)
+
+                # Voltar um pouco para garantir que lineups não ficaram "acima" do view se footer for grande
+                page.evaluate('window.scrollBy(0, -500)')
+                page.wait_for_timeout(500)
                 
                 # 4. Eventos (gols + cartões)
                 events = extract_events(page)

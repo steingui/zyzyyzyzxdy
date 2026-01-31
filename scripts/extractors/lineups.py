@@ -2,9 +2,10 @@
 lineups.py - Extrai escalações das equipes
 """
 
+
 import logging
 from typing import Any, Dict, List, Optional
-from playwright.sync_api import Page
+from playwright.sync_api import Page, TimeoutError as PlaywrightTimeout
 
 from ..utils.browser import safe_eval
 
@@ -30,6 +31,13 @@ def extract_lineups(page: Page) -> Dict[str, Dict[str, Any]]:
     Returns:
         Dicionário com escalacao_casa e escalacao_fora
     """
+    # Tentar garantir que o container esteja visível antes de extrair
+    try:
+        # Tenta esperar por um dos containers principais
+        page.wait_for_selector('.zz-container #game_report, .zz-module.game_matchup', timeout=5000)
+    except Exception:
+        logger.warning("Container de escalação não encontrado ou demorou para carregar.")
+
     result = safe_eval(page, '''
         (() => {
             const result = { 
@@ -134,6 +142,16 @@ def extract_lineups(page: Page) -> Dict[str, Dict[str, Any]]:
         })()
     ''', {'home': {'starters': [], 'bench': []}, 'away': {'starters': [], 'bench': []}})
 
+
+    h_count = len(result.get('home', {}).get('starters', []))
+    a_count = len(result.get('away', {}).get('starters', []))
+    
+    if h_count < 11 or a_count < 11:
+        logger.warning(f"Escalações incompletas? Casa: {h_count}, Fora: {a_count}")
+    else:
+        logger.info(f"Escalações extraídas: Casa({h_count}), Fora({a_count})")
+
+        
     return {
         'escalacao_casa': {
             'titulares': result.get('home', {}).get('starters', []),
