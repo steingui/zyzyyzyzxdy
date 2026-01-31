@@ -15,10 +15,10 @@ def get_ranking_xg():
         ranking = []
         for row in result:
             ranking.append({
-                "time": row.time,
-                "jogos": row.jogos,
-                "xg_favor_medio": float(row.xg_favor_medio),
-                "xg_contra_medio": float(row.xg_contra_medio)
+                "team": row.time,
+                "matches": row.jogos,
+                "avg_xg_for": float(row.xg_favor_medio),
+                "avg_xg_against": float(row.xg_contra_medio)
             })
             
         current_app.logger.info(f"Ranking xG retrieved: {len(ranking)} teams")
@@ -42,9 +42,9 @@ def get_overall_summary():
         result = db.session.execute(query).fetchone()
         
         summary = {
-            "total_jogos": result.total_jogos,
-            "total_gols": result.total_gols,
-            "media_gols": round(result.total_gols / result.total_jogos, 2) if result.total_jogos > 0 else 0
+            "total_matches": result.total_jogos,
+            "total_goals": result.total_gols,
+            "avg_goals": round(result.total_gols / result.total_jogos, 2) if result.total_jogos > 0 else 0
         }
         
         current_app.logger.info(f"Summary retrieved: {summary}")

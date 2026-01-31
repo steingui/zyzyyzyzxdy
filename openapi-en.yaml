@@ -1,0 +1,427 @@
+openapi: 3.0.0
+info:
+  title: BR-Statistics Hub API
+  description: |
+    **API for Brazilian Football Statistics - Brasileirão**
+    
+    This API provides detailed data about Brazilian football matches, teams, and performance statistics. 
+    Perfect for sports analysts, data scientists, and sports betting enthusiasts who need reliable match data and advanced metrics.
+    
+    **Key Features:**
+    - Real match results with goals, scores, and timing
+    - Expected Goals (xG) - a metric that shows how many goals a team "should have scored" based on shot quality
+    - Team performance rankings and historical data
+    - Match events (goals, cards, substitutions)
+    - Stadium attendance and referee information
+    
+    **Use Cases for Sports Betting:**
+    - Analyze team offensive/defensive strength (xG metrics)
+    - Compare home vs away performance
+    - Identify scoring patterns and trends
+    - Evaluate team consistency across rounds
+    
+  version: 3.0.0
+  contact:
+    name: BR-Statistics Hub
+    url: https://github.com/steingui/zyzyyzyzxdy
+
+servers:
+  - url: http://127.0.0.1:5000
+    description: Local development server
+  - url: http://localhost:5000
+    description: Localhost
+
+tags:
+  - name: General
+    description: General API health and status endpoints
+  - name: Matches
+    description: |
+      Get detailed match information including scores, statistics, and events.
+      Essential for analyzing past performance and predicting future outcomes.
+  - name: Teams
+    description: |
+      Access team profiles and historical data.
+      Useful for comparing teams before placing bets.
+  - name: Analytics
+    description: |
+      Advanced statistics and rankings using Expected Goals (xG) metrics.
+      These metrics help identify teams that are overperforming or underperforming their actual results.
+
+paths:
+  /health:
+    get:
+      tags:
+        - General
+      summary: Check if API is online
+      description: Use this to verify the API is working before making other requests
+      responses:
+        '200':
+          description: API is healthy and ready to use
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: healthy
+                  version:
+                    type: string
+                    example: 3.0.0
+
+  /api/matches:
+    get:
+      tags:
+        - Matches
+      summary: Get list of matches with optional filters
+      description: |
+        **What you get:** List of all matches with scores, teams, and basic info.
+        
+        **Why it's useful for betting:**
+        - See how teams performed in recent rounds
+        - Compare home vs away results
+        - Identify scoring patterns (high/low scoring matches)
+        
+        **Filter options:**
+        - By round number (rodada) - see all matches from a specific gameweek
+        - By team ID - see all matches for a specific team (home or away)
+        
+        **Example uses:**
+        - "Show me all Round 10 matches" → Filter by round=10
+        - "Show me all Flamengo matches" → Filter by team_id=1
+      parameters:
+        - name: rodada
+          in: query
+          description: Filter by championship round/gameweek number (1-38)
+          required: false
+          schema:
+            type: integer
+            example: 1
+        - name: time_id
+          in: query
+          description: Filter by team ID - shows matches where this team played (home or away)
+          required: false
+          schema:
+            type: integer
+            example: 5
+      responses:
+        '200':
+          description: List of matches matching your filters
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Match'
+
+  /api/matches/{match_id}:
+    get:
+      tags:
+        - Matches
+      summary: Get complete details for a specific match
+      description: |
+        **What you get:** Everything about one match - scores, statistics, events (goals, cards), referee, stadium, attendance.
+        
+        **Why it's useful for betting:**
+        - Deep dive into match statistics (possession, shots, xG)
+        - See when goals were scored (early/late game patterns)
+        - Check referee influence and attendance
+        - Understand match flow through events timeline
+        
+        **Key statistics explained:**
+        - **xG (Expected Goals)**: Measures shot quality. xG of 2.5 means the team created chances worth 2.5 goals
+        - **Possession**: Ball control percentage. High possession doesn't always mean more goals!
+        - **Shots on target**: Actual dangerous attempts that tested the goalkeeper
+        
+        **Example use:** Before betting on Flamengo's next match, check their last 3 matches to see xG trends
+      parameters:
+        - name: match_id
+          in: path
+          description: Unique match identifier (get this from /api/matches list)
+          required: true
+          schema:
+            type: integer
+            example: 1
+      responses:
+        '200':
+          description: Complete match details with statistics and events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchDetailed'
+        '404':
+          description: Match not found - check if match_id is correct
+
+  /api/teams:
+    get:
+      tags:
+        - Teams
+      summary: Get list of all teams in the championship
+      description: |
+        **What you get:** List of all 20 teams in the Brasileirão with their IDs.
+        
+        **Why it's useful:** 
+        - Get team IDs to use in other endpoints (like filtering matches)
+        - See all teams currently in the championship
+        
+        **Note:** Use the team ID to fetch detailed statistics for that team
+      responses:
+        '200':
+          description: List of all teams
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Team'
+
+  /api/teams/{team_id}:
+    get:
+      tags:
+        - Teams
+      summary: Get information for a specific team
+      description: |
+        **What you get:** Team name, badge/shield URL, and creation date.
+        
+        **Pro tip:** Combine this with /api/matches?time_id={team_id} to get all matches for this team,
+        then analyze their performance trends.
+      parameters:
+        - name: team_id
+          in: path
+          description: Team identifier (get from /api/teams list)
+          required: true
+          schema:
+            type: integer
+            example: 1
+      responses:
+        '200':
+          description: Team details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Team'
+        '404':
+          description: Team not found - check if team_id exists
+
+  /api/analytics/ranking-xg:
+    get:
+      tags:
+        - Analytics
+      summary: Team performance ranking based on Expected Goals (xG)
+      description: |
+        **What you get:** Teams ranked by their offensive and defensive quality using xG metrics.
+        
+        **What is xG?** 
+        Expected Goals measures the quality of chances created. A shot from inside the box has higher xG than a shot from 30 meters.
+        
+        **How to use for betting:**
+        - **avg_xg_for (Attack)**: How many quality chances the team creates per match
+          - High = Strong attack, creates many dangerous chances
+          - Low = Weak attack, struggles to create good opportunities
+        
+        - **avg_xg_against (Defense)**: How many quality chances the team concedes per match
+          - High = Weak defense, allows many dangerous shots
+          - Low = Strong defense, limits opponent chances
+        
+        **Betting insights:**
+        - Team with high xG_for but low actual goals → Unlucky, might score more soon (value bet)
+        - Team with low xG_for but high actual goals → Lucky, might regress to the mean
+        - High xG_against → Vulnerable defense, good for "Both teams to score" bets
+        
+        **Example:** If Flamengo has avg_xg_for=2.5 but only scores 1.5 goals/match, they're likely to improve.
+      responses:
+        '200':
+          description: Teams ranked by Expected Goals performance
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RankingXG'
+
+  /api/analytics/summary:
+    get:
+      tags:
+        - Analytics
+      summary: Overall championship statistics
+      description: |
+        **What you get:** High-level stats about the entire Brasileirão season.
+        
+        **Metrics included:**
+        - **total_matches**: How many matches have been played
+        - **total_goals**: Total goals scored in the championship
+        - **avg_goals**: Average goals per match
+        
+        **Why it's useful for betting:**
+        - **avg_goals** helps set expectations for Over/Under bets
+          - If avg is 2.5 goals/match, a bet on Over 2.5 is risky
+          - If avg is 3.2 goals/match, league has high scoring pattern
+        
+        - Compare individual match xG to league average to spot outliers
+        - Understand if this season is high-scoring or defensive
+        
+        **Example use:** League avg is 2.8 goals → Both teams average 1.5 xG → Total 3.0 xG → Bet Over 2.5 goals
+      responses:
+        '200':
+          description: Championship summary statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Summary'
+
+components:
+  schemas:
+    Team:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: Flamengo
+        shield_url:
+          type: string
+          nullable: true
+          example: null
+        created_at:
+          type: string
+          format: date-time
+
+    Match:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        round:
+          type: integer
+          example: 1
+        home_team:
+          $ref: '#/components/schemas/TeamSimple'
+        away_team:
+          $ref: '#/components/schemas/TeamSimple'
+        goals_home:
+          type: integer
+          example: 2
+        goals_away:
+          type: integer
+          example: 1
+        datetime:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          type: string
+          example: finished
+
+    MatchDetailed:
+      allOf:
+        - $ref: '#/components/schemas/Match'
+        - type: object
+          properties:
+            stadium:
+              type: object
+              properties:
+                id:
+                  type: integer
+                name:
+                  type: string
+            referee:
+              type: object
+              properties:
+                id:
+                  type: integer
+                name:
+                  type: string
+            statistics:
+              $ref: '#/components/schemas/Statistics'
+            events:
+              type: array
+              items:
+                $ref: '#/components/schemas/Event'
+
+    TeamSimple:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+
+    Statistics:
+      type: object
+      properties:
+        possession_home:
+          type: integer
+          example: 52
+        possession_away:
+          type: integer
+          example: 48
+        xg_home:
+          type: number
+          format: float
+          example: 1.56
+        xg_away:
+          type: number
+          format: float
+          example: 1.78
+        shots_home:
+          type: integer
+          example: 12
+        shots_away:
+          type: integer
+          example: 8
+
+    Event:
+      type: object
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          example: goal
+        minute:
+          type: integer
+          example: 34
+        team:
+          $ref: '#/components/schemas/TeamSimple'
+        player:
+          type: object
+          properties:
+            id:
+              type: integer
+            name:
+              type: string
+
+    RankingXG:
+      type: object
+      properties:
+        team:
+          type: string
+          example: Flamengo
+        matches:
+          type: integer
+          example: 10
+        avg_xg_for:
+          type: number
+          format: float
+          example: 1.85
+        avg_xg_against:
+          type: number
+          format: float
+          example: 1.22
+
+    Summary:
+      type: object
+      properties:
+        total_matches:
+          type: integer
+          example: 100
+        total_goals:
+          type: integer
+          example: 250
+        avg_goals:
+          type: number
+          format: float
+          example: 2.5
