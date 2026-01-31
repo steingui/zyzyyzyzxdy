@@ -14,6 +14,12 @@ def get_matches():
         rodada = request.args.get('rodada', type=int)
         time_id = request.args.get('time_id', type=int)
         
+        # Input validation
+        if rodada is not None and (rodada < 1 or rodada > 38):
+            return jsonify({"error": "Invalid rodada: must be between 1 and 38"}), 400
+        if time_id is not None and time_id < 1:
+            return jsonify({"error": "Invalid time_id: must be positive"}), 400
+        
         query = Partida.query
         
         if rodada:
@@ -33,6 +39,10 @@ def get_matches():
 def get_match(match_id):
     from werkzeug.exceptions import NotFound
     try:
+        # Input validation
+        if match_id < 1:
+            return jsonify({"error": "Invalid match_id: must be positive"}), 400
+            
         partida = Partida.query.get_or_404(match_id)
         current_app.logger.info(f"Fetched match details: ID={match_id}")
         return jsonify(match_schema.dump(partida))

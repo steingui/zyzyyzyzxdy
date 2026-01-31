@@ -23,6 +23,10 @@ def get_teams():
 def get_team(team_id):
     from werkzeug.exceptions import NotFound
     try:
+        # Input validation
+        if team_id < 1:
+            return jsonify({"error": "Invalid team_id: must be positive"}), 400
+            
         time = Time.query.get_or_404(team_id)
         current_app.logger.info(f"Fetched team: ID={team_id}")
         return jsonify(time_schema.dump(time))

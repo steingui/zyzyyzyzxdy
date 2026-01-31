@@ -4,6 +4,9 @@ from flask_marshmallow import Marshmallow
 from flask_migrate import Migrate
 from flask_caching import Cache
 from flask_swagger_ui import get_swaggerui_blueprint
+from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 import os
 import logging
 import json
@@ -44,6 +47,24 @@ def create_app(config_class=Config):
     # Configurar cache local
     app.config['CACHE_TYPE'] = 'SimpleCache'
     app.config['CACHE_DEFAULT_TIMEOUT'] = 300  # 5 minutos
+    
+    # Security: CORS Configuration
+    # Adjust 'origins' for production to whitelist only your domains
+    CORS(app, resources={
+        r"/api/*": {
+            "origins": os.getenv('CORS_ORIGINS', '*').split(','),  # Use '*' for dev, specific domains for prod
+            "methods": ["GET", "OPTIONS"],  # Read-only API
+            "allow_headers": ["Content-Type", "Accept"]
+        }
+    })
+    
+    # Security: Rate Limiting
+    limiter = Limiter(
+        app=app,
+        key_func=get_remote_address,
+        default_limits=["200 per day", "50 per hour"],
+        storage_uri="memory://"
+    )
 
     # Inicializar extensões com o app
     db.init_app(app)
@@ -120,6 +141,18 @@ def create_app(config_class=Config):
 
     @app.route('/health')
     def health_check():
-        return {'status': 'healthy', 'version': '2.0.0'}, 200
+        return {'status': 'healthy', 'version': '3.0.0'}, 200
+    
+    # Security: HTTP Security Headers
+    @app.after_request
+    def set_security_headers(response):
+        from flask import request
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['X-Frame-Options'] = 'DENY'
+        response.headers['X-XSS-Protection'] = '1; mode=block'
+        # Only add HSTS if using HTTPS
+        if request.is_secure:
+            response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+        return response
 
     return app
