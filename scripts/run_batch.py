@@ -21,11 +21,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 try:
     from scripts.utils.normalization import normalize_match_data
     from scripts.db_importer import process_input
+    from scripts.utils.state import get_last_processed_round
 except ImportError:
     # Fallback se rodar de dentro de scripts/
     sys.path.append(str(Path(__file__).parent.parent))
     from scripts.utils.normalization import normalize_match_data
     from scripts.db_importer import process_input
+    from scripts.utils.state import get_last_processed_round
 
 # Configuração
 SCRIPTS_DIR = Path(__file__).parent
@@ -44,15 +46,24 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def get_matches():
-    """Chama o crawler para descobrir jogos."""
-    logger.info("Descobrindo jogos da rodada...")
+    """Calcula próxima rodada e chama o crawler."""
+    last_round = get_last_processed_round()
+    next_round = last_round + 1
+    logger.info(f"Última rodada no banco: {last_round}. Buscando rodada: {next_round}")
+    
     try:
+        cmd = [sys.executable, str(SCRIPTS_DIR / "crawl_round.py"), "--round", str(next_round)]
         result = subprocess.run(
-            [sys.executable, str(SCRIPTS_DIR / "crawl_round.py")],
+            cmd,
             capture_output=True, text=True, check=True
         )
         # O crawler imprime logs no stderr e JSON no stdout
         urls = json.loads(result.stdout)
+        
+        if not urls:
+            logger.warning(f"Rodada {next_round} não tem jogos disponíveis ou prontos.")
+            return []
+            
         return urls
     except subprocess.CalledProcessError as e:
         logger.error(f"Falha ao buscar jogos: {e.stderr}")
