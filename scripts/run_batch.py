@@ -152,7 +152,7 @@ def main():
         league=args.league,
         year=args.year,
         round=args.round if args.round else 'auto',
-        round=args.round if args.round else 'auto',
+
         hostname=socket.gethostname(),
         timestamp=start_time.isoformat()
     )
