@@ -1,109 +1,105 @@
 # RFC: Arquitetura de Scraping Resiliente (Zero Tolerance)
 
 ## Status
-**Proposta** - Em Avaliação
+**Implementado (Fase 1) / Roadmap Atualizado**
 
 ## Contexto
-O sistema atual realiza o scraping de rodadas do Brasileirão (e outras ligas) através de um endpoint `/api/scrape`. Atualmente, o processo é orquestrado por um worker em thread (`app/routes/scrape.py`) que dispara um subprocesso (`scripts/run_batch.py`), o qual por sua vez utiliza threads para processar jogos em paralelo.
+O sistema evoluiu para uma arquitetura de "Zero Tolerância a Erros" na Fase 1. O foco agora é garantir persistência da fila, rotação de IPs e escalabilidade.
+O mecanismo de scraping atual (`run_batch.py`) utiliza o banco de dados como *Source of Truth* (SSOT) para evitar duplicidade e garantir idempotência.
 
-O requisito atual é alcançar **"Zero Tolerância a Erros"**, significando que:
-1.  Nenhum jogo deve ser perdido ou processado pela metade.
-2.  Falhas transientes (rede, timeout) devem ser retentadas automaticamente com estratégias robustas.
-3.  Falhas permanentes (mudança de layout, dados inválidos) devem ser isoladas, persistidas para análise e não podem comprometer o lote inteiro.
-4.  O sistema deve ser observável e auditável passo a passo.
+## Conquistas da Fase 1 (Implementado)
 
-## Arquitetura Atual e Pontos de Falha
+A infraestrutura básica de resiliência foi concluída com sucesso:
 
-| Componente | Implementação Atual | Risco / Ponto de Falha |
-| :--- | :--- | :--- |
-| **Fila de Jobs** | `queue.Queue` (Em memória no Flask) | **Perda de Dados**: Se a API reiniciar, a fila é perdida. Não há persistência. |
-| **Worker** | `threading.Thread` no próprio processo da API | **Concorrência/Recursos**: Worker compete recursos com a API. Crash da API mata o worker. |
-| **Execução do Batch** | `subprocess.Popen("run_batch.py")` | **Opacidade**: Difícil monitorar progresso granular externamente. Logs dependem de pipes. |
-| **Paralelismo** | `ThreadPoolExecutor` em `run_batch.py` | **Race Conditions**: Múltiplas threads escrevendo no mesmo arquivo JSON ou competindo por conexões de banco inadequadas. |
-| **Tratamento de Erros** | `try/except` simples com 3 retries fixos | **Insuficiente**: Backoff linear simples. Sem "Dead Letter Queue" para falhas definitivas. |
-| **Persistência** | `process_input` direto no loop | **Atomicidade**: Falha no meio de um batch deixa o estado da rodada "parcial" sem indicador claro de quais jogos faltam. |
+1.  **Mecanismo de Retry (Tenacity)**:
+    - Implementado em `scripts/scraper.py`.
+    - Utiliza *Exponential Backoff* para falhas transientes (timeouts, erros de rede).
+    - Captura erros específicos do Playwright e exceções genéricas.
 
-## Proposta de Solução: Arquitetura de Resiliência Nível 1 (Imediata)
+2.  **Verificação de Estado no Banco (SSOT)**:
+    - O script `run_batch.py` verifica a tabela `partidas` antes de iniciar o scraping.
+    - Garante que jogos já processados sejam pulados, permitindo re-execuções seguras (idempotência).
+    - Elimina a dependência de arquivos JSON locais frágeis.
 
-Estas mudanças podem ser implementadas no código existente sem reescrever toda a infraestrutura (ex: sem adicionar Redis/Celery imediatamente).
+3.  **Escritas Atômicas**:
+    - O `scripts/db_importer.py` utiliza transações de banco de dados (`commit`/`rollback`).
+    - Garante que dados parciais (ex: jogo sem estatísticas) não sejam persistidos em caso de erro.
 
-### 1. Mecanismo de Retry Inteligente com Exponential Backoff
-Substituir o loop simples de retry em `run_batch.py` por uma estratégia robusta usando `tenacity`:
-- **Jitter**: Introduzir aleatoriedade para evitar "thundering herd" no site alvo.
-- **Tipos de Erro**: Distinguir erros recuperáveis (Timeout, 503) de erros fatais (Layout Changed, 404).
+4.  **Logging Contextual**:
+    - Logs padronizados para rastrear o fluxo de execução.
+    - Correção de erros de logging (atributo inexistente).
 
-### 2. Persistência de Estado (State Handling)
-O `run_batch.py` já usa `rodada_atual_full.json`, mas ele deve evoluir para um "Job Journal" no banco de dados.
-- Criar tabela `scrape_jobs` e `scrape_tasks` (por jogo).
-- **Zero Tolerance**: Antes de começar a scrapear, o script identifica os 10 jogos da rodada e cria 10 registros `scrape_tasks` com status `PENDING`.
-- Se o script crashar, ao reiniciar ele sabe exatamente quais jogos continuam `PENDING` ou `FAILED` e retoma apenas eles.
+*Nota: A implementação de um endpoint dedicado de retry (`/api/scrape/retry` e flag `--force`) foi avaliada e descartada em favor do comportamento padrão "inteligente" que verifica o banco automaticamente.*
 
-### 3. Validação Estrita (Schema Enforcing)
-Antes de tentar inserir no banco, os dados extraídos devem passar por validação rigorosa (Pydantic ou Marshmallow).
-- Se um campo obrigatório for nulo, falha a task (não salva lixo) e alerta.
+## Riscos Remanescentes e Pontos de Falha
 
-### 4. Dead Letter "Table"
-Jogos que falharem após N tentativas não são descartados. Eles são marcados como `FAILED` na tabela `scrape_tasks` com o JSON do erro e o HTML snapshot (se possível).
-- **Interface de Reparos**: Um endpoint `/api/scrape/retry-failed` que busca apenas essas tasks falhas.
+| Componente | Implementação Atual | Risco / Ponto de Falha | Prioridade |
+| :--- | :--- | :--- | :--- |
+| **Fila de Jobs** | `queue.Queue` (Memória) | **Perda de Dados**: Reiniciar a API apaga todos os jobs pendentes. | **CRÍTICA** |
+| **Bloqueio de IP** | IP Único do Servidor | **Bloqueio Total**: Sem rotação de proxies, o servidor pode ser banido pelo alvo. | **ALTA** |
+| **Worker Único** | Threads locais | **Gargalo**: Um job pesado bloqueia ou compete recursos com a API. | **MÉDIA** |
+| **Diagnóstico** | Logs em Arquivo | **Reatividade Baixa**: Difícil saber de falhas sem acesso SSH aos logs. | **MÉDIA** |
 
-## Proposta de Solução: Arquitetura Nível 2 (Ideal / Futura)
+## Plano de Ação Atualizado (Prioridades)
 
-Para escalar e garantir robustez absoluta independente da API.
+### Fase 2: Robustez de Infraestrutura (Próxima Prioridade)
+Esta fase foca em garantir que o sistema sobreviva a restarts e bloqueios.
 
-### 1. Fila Persistente (Redis/RabbitMQ + Celery/Dramatiq)
-Desacoplar a recepção do request da execução.
-- API publica mensagem `ScrapeMatch(url)` na fila.
-- Workers independentes (em outros containers) consomem.
-- Persistência garantida pelo broker.
+1.  [ ] **Persistência de Fila (Redis)** (Prioridade 1):
+    - **Problema**: `queue.Queue` é volátil.
+    - **Solução**: Substituir por Redis (ou SQLite simples para fila) para manter jobs persistentes entre restarts da API.
+    - **Benefício**: Zero perda de jobs agendados.
 
-### 2. Database Transactions Atômicas
-Garantir que a inserção de Partida + Eventos + Stats ocorra em uma única transação. Se algo falhar, rollback completo daquele jogo (evita dados parciais como jogo sem eventos).
+2.  [ ] **Rotação de Proxies (Smart Proxy)** (Prioridade 2):
+    - **Problema**: Scraping massivo em um único IP leva a bloqueios (429/403).
+    - **Solução**: Integrar serviço de proxy rotativo ou pool de proxies gratuitos (menos confiável) / pagos (BrightData/ScraperAPI).
+    - **Benefício**: Escalabilidade e evasão de bloqueios.
 
-## Plano de Ação (Prioridades)
+3.  [ ] **Monitoramento e Alertas (Health Checks)** (Prioridade 3):
+    - **Problema**: Falhas silenciosas.
+    - **Solução**: Endpoint `/health` expandido que checa conectividade externa e integridade do banco. Webhook (Discord/Slack) para falhas fatais.
 
-### Fase 1: Blindagem do Script Atual (High Priority)
-1.  [ ] **Implementar `tenacity`**: Adicionar retries exponenciais no `scraper.py` e `run_batch.py`.
-2.  [ ] **State Checkpoint no Banco**: Modificar `run_batch.py` para não depender apenas de JSON local, mas verificar na tabela `partidas` se a URL/Jogo já existe e está completo (`status='finished'`).
-3.  [ ] **Atomic Writes**: Garantir que `process_input` use transações (`db.session.begin_nested()`).
+### Fase 3: Escalabilidade e Manutenibilidade (Futuro)
 
-### Fase 2: Observabilidade e Recuperação
-1.  [ ] **Logs Estruturados**: Melhorar o log para incluir `job_id`, `match_id` e `attempt_count` em todas as linhas (já iniciado em `run_batch.py`, expandir).
-2.  [ ] **Endpoint de Retry**: Criar rota que reprocessa apenas jogos que faltam numa rodada (checando quais partidas da rodada não estão no banco).
+1.  [ ] **Dead Letter Queue (DLQ)**:
+    - Armazenar payloads de jobs que falharam definitivamente após todos retries para análise posterior.
 
-### Fase 3: Infraestrutura (Async Task Queue)
-1.  [ ] Migrar de `threading` + `subprocess` para **Celery** com Redis.
+2.  [ ] **Arquitetura de Workers Distribuídos (Celery)**:
+    - Separar totalmente a API dos Workers.
+    - Permitir escalar workers horizontalmente em múltiplos servidores.
 
-## Exemplo de Fluxo "Zero Tolerance" Proposto
+3.  [ ] **Gerenciamento de Recursos do Browser**:
+    - Garantir limpeza agressiva de contextos do Playwright para evitar *memory leaks* em longas execuções.
+
+## Fluxo de Scraping Atualizado (v3.1.0)
 
 ```mermaid
 sequenceDiagram
     participant API
-    participant Worker
+    participant BatchScript
     participant Scraper
     participant DB
+
+    API->>BatchScript: Spawn Process (Round X)
+    BatchScript->>Scraper: Obter Lista de Jogos (Crawler)
+    Scraper-->>BatchScript: Lista de URLs
     
-    API->>Worker: Iniciar Rodada X
-    Worker->>DB: Criar ou Ler Job (Rodada X)
-    Worker->>Scraper: Descobrir URLs dos Jogos
-    Scraper-->>Worker: Lista de 10 URLs
-    
-    loop Para cada URL (Paralelo)
-        Worker->>DB: Verificar se Jogo já existe (Status=Finished)
-        alt Já existe
-            Worker->>Worker: Skip
-        else Não existe
-            Worker->>Scraper: Scrape(URL)
+    loop Para cada URL
+        BatchScript->>DB: Check if Exists (status=finished)
+        alt Já Existe
+            BatchScript->>BatchScript: Skip (Idempotência)
+        else Novo/Incompleto
+            BatchScript->>Scraper: Scrape(URL)
+            activate Scraper
+            Note right of Scraper: Retries automáticos (Tenacity)
             alt Sucesso
-                Scraper-->>Worker: Dados JSON
-                Worker->>DB: Transaction Start
-                Worker->>DB: Insert Partida, Times, Stats...
-                Worker->>DB: Commit
-            else Erro Transiente (Timeout)
-                Worker->>Scraper: Retry com Backoff (x3)
-            else Erro Fatal
-                Worker->>DB: Log Error na Tabela de Tarefas
-                Worker->>Worker: Marcar para revisão manual
+                Scraper-->>BatchScript: Dados JSON
+                BatchScript->>DB: Atomic Insert Transaction
+            else Falha Definitiva
+                Scraper-->>BatchScript: Exception
+                BatchScript->>BatchScript: Log Error & Continue
             end
+            deactivate Scraper
         end
     end
 ```
