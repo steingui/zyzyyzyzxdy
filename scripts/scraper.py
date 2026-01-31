@@ -48,7 +48,7 @@ from scripts.extractors import (
     extract_player_ratings,
     extract_player_detailed_stats,
 )
-from scripts.utils.browser import remove_ads, scroll_to_top
+from scripts.utils import remove_ads, scroll_to_top, merge_player_data
 
 # Garantir que diretório de logs existe
 LOG_DIR = Path(__file__).parent.parent / 'logs'
@@ -173,6 +173,9 @@ class OgolScraper:
                         self.data.update(detailed_stats)
                 
                 logger.info(f"Scraping concluído: {self.data.get('home_team', '?')} x {self.data.get('away_team', '?')}")
+                
+                # Unificar dados de jogadores para evitar redundância
+                self.data = merge_player_data(self.data)
                 
             except PlaywrightTimeout as e:
                 logger.error(f"Timeout ao acessar {url}: {e}")

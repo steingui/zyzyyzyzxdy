@@ -1,8 +1,12 @@
-"""
-Utils package - Funções utilitárias para o scraper
-"""
+from .browser import safe_eval, remove_ads, scroll_to_top
+from .parsing import normalize_name, parse_value
+from .merger import merge_player_data
 
-from .browser import safe_eval, remove_ads
-from .parsing import parse_value, normalize_name
-
-__all__ = ['safe_eval', 'remove_ads', 'parse_value', 'normalize_name']
+__all__ = [
+    'safe_eval',
+    'remove_ads',
+    'scroll_to_top',
+    'normalize_name',
+    'parse_value',
+    'merge_player_data',
+]
