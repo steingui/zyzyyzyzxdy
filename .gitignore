@@ -7,12 +7,12 @@ env/
 venv/
 .env
 
-# Project Specific
+# Application specific
 logs/
+*.log
+rodada_*.json
+certs/
 data/
-*.db
-*.json
-*.csv
 rodada_atual_full.json
 
 # Credentials & Security

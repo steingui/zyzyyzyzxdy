@@ -77,10 +77,12 @@ def create_app(config_class=Config):
     from app.blueprints.matches import matches_bp
     from app.blueprints.teams import teams_bp
     from app.blueprints.analytics import analytics_bp
+    from app.routes.scrape import scrape_bp
 
     app.register_blueprint(matches_bp, url_prefix='/api/matches')
     app.register_blueprint(teams_bp, url_prefix='/api/teams')
     app.register_blueprint(analytics_bp, url_prefix='/api/analytics')
+    app.register_blueprint(scrape_bp)  # Já tem url_prefix='/api/scrape' no blueprint
 
     # Swagger UI - English
     SWAGGER_URL_EN = '/api/docs/en'
@@ -88,7 +90,8 @@ def create_app(config_class=Config):
     swaggerui_bp_en = get_swaggerui_blueprint(
         SWAGGER_URL_EN,
         API_URL_EN,
-        config={'app_name': "BR-Statistics Hub API (EN)"}
+        config={'app_name': "BR-Statistics Hub API (EN)"},
+        blueprint_name='swagger_ui_en'
     )
     app.register_blueprint(swaggerui_bp_en, url_prefix=SWAGGER_URL_EN)
     
@@ -98,7 +101,8 @@ def create_app(config_class=Config):
     swaggerui_bp_pt = get_swaggerui_blueprint(
         SWAGGER_URL_PT,
         API_URL_PT,
-        config={'app_name': "BR-Statistics Hub API (PT-BR)"}
+        config={'app_name': "BR-Statistics Hub API (PT-BR)"},
+        blueprint_name='swagger_ui_pt'
     )
     app.register_blueprint(swaggerui_bp_pt, url_prefix=SWAGGER_URL_PT)
     
