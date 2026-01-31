@@ -35,6 +35,7 @@ from scripts.config import (
     JS_INITIAL_WAIT,
     STABILIZATION_WAIT,
     USER_AGENT,
+    EXTRA_HEADERS,
     VIEWPORT,
     BROWSER_ARGS,
     INITIAL_SCROLL_POSITIONS,
@@ -48,7 +49,8 @@ from scripts.extractors import (
     extract_player_ratings,
     extract_player_detailed_stats,
 )
-from scripts.utils import remove_ads, scroll_to_top, merge_player_data
+from scripts.utils import remove_ads, scroll_to_top
+from scripts.utils.merger import merge_player_data
 
 # Garantir que diretório de logs existe
 LOG_DIR = Path(__file__).parent.parent / 'logs'
@@ -99,9 +101,13 @@ class OgolScraper:
                 headless=self.headless,
                 args=BROWSER_ARGS
             )
+            # Contexto com anti-detecção e headers extras
             context = browser.new_context(
                 user_agent=USER_AGENT,
-                viewport=VIEWPORT
+                viewport=VIEWPORT,
+                extra_http_headers=EXTRA_HEADERS,
+                locale='pt-BR',
+                timezone_id='America/Sao_Paulo'
             )
             page = context.new_page()
             

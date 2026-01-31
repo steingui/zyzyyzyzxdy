@@ -28,8 +28,8 @@ def parse_date(date_str: str) -> Optional[str]:
         
     s = date_str.strip().lower()
     
-    # Caso 1: DD/MM/YYYY HH:MM
-    match_br_full = re.search(r'(\d{1,2})/(\d{1,2})/(\d{4})(?:\s+(\d{1,2}:\d{2}))?', s)
+    # Caso 1: DD/MM/YYYY HH:MM (ou com traços)
+    match_br_full = re.search(r'(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:\s+(\d{1,2}:\d{2}))?', s)
     if match_br_full:
         day, month, year, time = match_br_full.groups()
         if time:

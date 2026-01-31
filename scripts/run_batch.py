@@ -76,6 +76,7 @@ def scrape_match(url, index, total):
             from scripts.scraper import OgolScraper
             
             # Cria nova instância para cada thread
+            # ANTI-BLOCK: Headless=True (Usuario pediu para voltar) - Mantendo headers para segurança
             scraper = OgolScraper(headless=True, detailed=True)
             data = scraper.scrape(url)
             return data
@@ -83,8 +84,9 @@ def scrape_match(url, index, total):
         except Exception as e:
             logger.warning(f"Erro na tentativa {attempt} para {url}: {e}")
             if attempt < max_retries:
-                wait_time = 5 * attempt
-                time.sleep(wait_time)  # Backoff: 5s, 10s...
+                # ANTI-BLOCK: Aumentar backoff
+                wait_time = 10 * attempt
+                time.sleep(wait_time)
             else:
                 logger.error(f"Falha definitiva após {max_retries} tentativas: {url}")
                 return None
@@ -132,10 +134,11 @@ def main():
     success_count = len(results["games"])
     total_urls = success_count + len(urls)
     
-    logger.info(f"Iniciando processamento PARALELO de {len(urls)} jogos restantes (max_workers=3)...")
+    # ANTI-BLOCK: Execução sequencial para evitar detecção
+    logger.info(f"Iniciando processamento SEQUENCIAL de {len(urls)} jogos restantes...")
 
-    # 3. Processar em Paralelo
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    # 3. Processar (workers=1 efetivamente sequencial)
+    with ThreadPoolExecutor(max_workers=1) as executor:
         # Submit tasks
         future_to_url = {
             executor.submit(scrape_match, url, i, total_urls): url
