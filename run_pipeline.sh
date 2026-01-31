@@ -36,7 +36,8 @@ fi
 echo -e "${GREEN}>>> 🕸️  Executando run_batch.py (Buscando dados...)${NC}"
 
 # Capturando exit code para tratamento de erro
-python3 "$SCRIPT_BATCH"
+# "$@" repassa quaisquer argumentos (ex: 1 para rodada 1)
+python3 "$SCRIPT_BATCH" "$@"
 EXIT_CODE=$?
 
 if [ $EXIT_CODE -ne 0 ]; then

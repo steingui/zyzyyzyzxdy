@@ -45,11 +45,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def get_matches():
-    """Calcula próxima rodada e chama o crawler."""
-    last_round = get_last_processed_round()
-    next_round = last_round + 1
-    logger.info(f"Última rodada no banco: {last_round}. Buscando rodada: {next_round}")
+def get_matches(force_round: int = None):
+    """Calcula próxima rodada (ou usa forçada) e chama o crawler."""
+    if force_round:
+        next_round = force_round
+        logger.info(f"MODO MANUAL: Forçando busca da rodada: {next_round}")
+    else:
+        last_round = get_last_processed_round()
+        next_round = last_round + 1
+        logger.info(f"Última rodada no banco: {last_round}. Buscando rodada: {next_round}")
     
     try:
         cmd = [sys.executable, str(SCRIPTS_DIR / "crawl_round.py"), "--round", str(next_round)]
@@ -103,10 +107,16 @@ def scrape_match(url, index, total):
                 return None
 
 def main():
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Batch Scraper Runner")
+    parser.add_argument("round", nargs="?", type=int, help="Forçar execução de uma rodada específica (ignora estado do banco)")
+    args = parser.parse_args()
+    
     start_time = datetime.now()
     
     # 1. Obter lista de jogos
-    urls = get_matches()
+    urls = get_matches(force_round=args.round)
     if not urls:
         logger.info("Pipeline encerrado: Nenhum jogo disponível para processar na próxima rodada.")
         sys.exit(0)
