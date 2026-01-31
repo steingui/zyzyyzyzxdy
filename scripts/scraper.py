@@ -44,6 +44,7 @@ from scripts.extractors import (
     extract_statistics,
     extract_events,
     extract_lineups,
+    extract_player_ratings,
 )
 from scripts.utils.browser import remove_ads, scroll_to_top
 
@@ -154,6 +155,11 @@ class OgolScraper:
                 # 5. Escalações
                 lineups = extract_lineups(page)
                 self.data.update(lineups)
+                
+                # 6. Ratings dos jogadores (campo tático visual)
+                ratings = extract_player_ratings(page)
+                if ratings:
+                    self.data.update(ratings)
                 
                 logger.info(f"Scraping concluído: {self.data.get('home_team', '?')} x {self.data.get('away_team', '?')}")
                 
