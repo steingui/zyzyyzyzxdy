@@ -1,0 +1,294 @@
+{
+    "info": {
+        "_postman_id": "8d3e9f2a-7b6c-4e5d-9a8b-1c2d3e4f5a6b",
+        "name": "BR-Statistics Hub API",
+        "description": "API para consulta de estatísticas do futebol brasileiro - v3.0 com endpoints de scraping",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "General",
+            "item": [
+                {
+                    "name": "Health Check",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{baseUrl}}/health",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "health"
+                            ]
+                        }
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Matches",
+            "item": [
+                {
+                    "name": "List Matches",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{baseUrl}}/api/matches?rodada=1",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "matches"
+                            ],
+                            "query": [
+                                {
+                                    "key": "rodada",
+                                    "value": "1"
+                                },
+                                {
+                                    "key": "time_id",
+                                    "value": "1",
+                                    "disabled": true
+                                }
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Match Detail",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{baseUrl}}/api/matches/1",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "matches",
+                                "1"
+                            ]
+                        }
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Teams",
+            "item": [
+                {
+                    "name": "List Teams",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{baseUrl}}/api/teams",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "teams"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Team Detail",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{baseUrl}}/api/teams/1",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "teams",
+                                "1"
+                            ]
+                        }
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Analytics",
+            "item": [
+                {
+                    "name": "Ranking xG",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{baseUrl}}/api/analytics/ranking-xg",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "analytics",
+                                "ranking-xg"
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Season Summary",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{baseUrl}}/api/analytics/summary",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "analytics",
+                                "summary"
+                            ]
+                        }
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Scraping",
+            "item": [
+                {
+                    "name": "Start Scraping Job",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"league\": \"brasileirao\",\n  \"year\": 2026,\n  \"round\": 1\n}"
+                        },
+                        "url": {
+                            "raw": "{{baseUrl}}/api/scrape",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "scrape"
+                            ]
+                        },
+                        "description": "Trigger scraping pipeline for a specific league/round. Returns job_id for tracking."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Job Status",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{baseUrl}}/api/scrape/status/{{jobId}}",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "scrape",
+                                "status",
+                                "{{jobId}}"
+                            ]
+                        },
+                        "description": "Check status of a scraping job (running, completed, cancelled)"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "List All Jobs",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{baseUrl}}/api/scrape/jobs?status=running&limit=50",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "scrape",
+                                "jobs"
+                            ],
+                            "query": [
+                                {
+                                    "key": "status",
+                                    "value": "running",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "league",
+                                    "value": "brasileirao",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "limit",
+                                    "value": "50",
+                                    "disabled": true
+                                }
+                            ]
+                        },
+                        "description": "List all scraping jobs with optional filters"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Cancel Job",
+                    "request": {
+                        "method": "POST",
+                        "header": [],
+                        "url": {
+                            "raw": "{{baseUrl}}/api/scrape/cancel/{{jobId}}",
+                            "host": [
+                                "{{baseUrl}}"
+                            ],
+                            "path": [
+                                "api",
+                                "scrape",
+                                "cancel",
+                                "{{jobId}}"
+                            ]
+                        },
+                        "description": "Cancel a running scraping job"
+                    },
+                    "response": []
+                }
+            ]
+        }
+    ],
+    "variable": [
+        {
+            "key": "baseUrl",
+            "value": "http://127.0.0.1:5000",
+            "type": "string"
+        },
+        {
+            "key": "jobId",
+            "value": "scrape_brasileirao_2026_1_1738354845",
+            "type": "string"
+        }
+    ]
+}

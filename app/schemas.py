@@ -22,7 +22,7 @@ class JogadorSchema(SQLAlchemyAutoSchema):
     class Meta:
         model = Jogador
         load_instance = True
-    time_atual = fields.Nested(TimeSchema, only=("id", "name"))
+    time_atual = fields.Nested(TimeSchema, only=("id", "nome"))
     
     @post_dump
     def normalize_fields(self, data, **kwargs):
@@ -91,8 +91,8 @@ class EventoSchema(SQLAlchemyAutoSchema):
     class Meta:
         model = Evento
         load_instance = True
-    time = fields.Nested(TimeSchema, only=("id", "name"))
-    jogador = fields.Nested(JogadorSchema, only=("id", "name"))
+    time = fields.Nested(TimeSchema, only=("id", "nome"))
+    jogador = fields.Nested(JogadorSchema, only=("id", "nome"))
     
     @post_dump
     def normalize_fields(self, data, **kwargs):
@@ -116,10 +116,10 @@ class PartidaSchema(SQLAlchemyAutoSchema):
         load_instance = True
         include_fk = True
 
-    time_casa = fields.Nested(TimeSchema, only=("id", "name"))
-    time_fora = fields.Nested(TimeSchema, only=("id", "name"))
-    estadio = fields.Nested(EstadioSchema, only=("id", "name"))
-    arbitro = fields.Nested(ArbitroSchema, only=("id", "name"))
+    time_casa = fields.Nested(TimeSchema, only=("id", "nome"))
+    time_fora = fields.Nested(TimeSchema, only=("id", "nome"))
+    estadio = fields.Nested(EstadioSchema, only=("id", "nome"))
+    arbitro = fields.Nested(ArbitroSchema, only=("id", "nome"))
     estatisticas = fields.Nested(EstatisticaPartidaSchema)
     eventos = fields.List(fields.Nested(EventoSchema))
     

@@ -20,7 +20,7 @@ info:
     - Identify scoring patterns and trends
     - Evaluate team consistency across rounds
     
-  version: 3.0.0
+  version: 3.1.0
   contact:
     name: BR-Statistics Hub
     url: https://github.com/steingui/zyzyyzyzxdy
@@ -46,6 +46,10 @@ tags:
     description: |
       Advanced statistics and rankings using Expected Goals (xG) metrics.
       These metrics help identify teams that are overperforming or underperforming their actual results.
+  - name: Scraping
+    description: |
+      Remote scraping pipeline control. Trigger data collection jobs for any league/round via HTTP.
+      Monitor job status and track scraping progress in real-time.
 
 paths:
   /health:
@@ -269,6 +273,189 @@ paths:
               schema:
                 $ref: '#/components/schemas/Summary'
 
+  /api/scrape:
+    post:
+      tags:
+        - Scraping
+      summary: Start a scraping job for a specific league/round
+      description: |
+        **What it does:** Triggers the scraping pipeline to collect match data from ogol.com.br
+        
+        **Parameters:**
+        - **league**: League slug (e.g., "brasileirao", "premier-league", "la-liga")
+        - **year**: Season year (e.g., 2026)
+        - **round**: Round/gameweek number (1-38)
+        
+        **Returns:** Job ID for tracking progress
+        
+        **How it works:**
+        1. Validates league exists in database
+        2. Validates round is within league's max rounds
+        3. Spawns async subprocess to scrape matches
+        4. Returns immediately with job_id
+        5. Check status with GET /api/scrape/status/{job_id}
+        
+        **Note:** Job runs in background. Won't start duplicate jobs for same league/round.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - round
+              properties:
+                league:
+                  type: string
+                  default: brasileirao
+                  example: brasileirao
+                year:
+                  type: integer
+                  default: 2026
+                  example: 2026
+                  example: 1
+                sync:
+                  type: boolean
+                  default: false
+                  example: false
+                  description: If true, runs synchronously (blocks response until finished)
+      responses:
+        '202':
+          description: Scraping job started successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScrapeJobStarted'
+        '400':
+          description: Invalid parameters (missing round, invalid league, or round out of range)
+        '409':
+          description: Job already running for this league/round
+
+  /api/scrape/status/{job_id}:
+    get:
+      tags:
+        - Scraping
+      summary: Get status of a scraping job
+      description: |
+        **What it does:** Check if your scraping job is still running or completed
+        
+        **Status values:**
+        - **running**: Job is actively scraping matches
+        - **completed**: Job finished successfully
+        - **cancelled**: Job was cancelled by user
+        
+        **Response includes:**
+        - Start/completion timestamps
+        - Duration in seconds
+        - Matches scraped/failed counts
+        - Log file path for troubleshooting
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          description: Job identifier returned from POST /api/scrape
+          schema:
+            type: string
+            example: scrape_brasileirao_2026_1_1738354845
+      responses:
+        '200':
+          description: Job status and details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScrapeJob'
+        '404':
+          description: Job not found
+
+  /api/scrape/jobs:
+    get:
+      tags:
+        - Scraping
+      summary: List all scraping jobs
+      description: |
+        **What it does:** Get a list of all scraping jobs (running and completed)
+        
+        **Filter options:**
+        - By status (running, completed, cancelled)
+        - By league
+        - Limit results (default: 50, max: 100)
+        
+        **Sorting:** Most recent jobs first
+      parameters:
+        - name: status
+          in: query
+          description: Filter by job status
+          required: false
+          schema:
+            type: string
+            enum: [running, completed, cancelled]
+        - name: league
+          in: query
+          description: Filter by league slug
+          required: false
+          schema:
+            type: string
+            example: brasileirao
+        - name: limit
+          in: query
+          description: Maximum number of results
+          required: false
+          schema:
+            type: integer
+            default: 50
+            maximum: 100
+      responses:
+        '200':
+          description: List of jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  jobs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ScrapeJob'
+
+  /api/scrape/cancel/{job_id}:
+    post:
+      tags:
+        - Scraping
+      summary: Cancel a running scraping job
+      description: |
+        **What it does:** Stops a scraping job that is currently running
+        
+        **Note:** Can only cancel jobs with status="running"
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          description: Job identifier to cancel
+          schema:
+            type: string
+            example: scrape_brasileirao_2026_1_1738354845
+      responses:
+        '200':
+          description: Job cancelled successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: cancelled
+                  job_id:
+                    type: string
+                  message:
+                    type: string
+        '400':
+          description: Job is not running
+        '404':
+          description: Job not found
+
 components:
   schemas:
     Team:
@@ -425,3 +612,79 @@ components:
           type: number
           format: float
           example: 2.5
+
+    ScrapeJobStarted:
+      type: object
+      properties:
+        status:
+          type: string
+          example: started
+        job_id:
+          type: string
+          example: scrape_brasileirao_2026_1_1738354845
+        league:
+          type: string
+          example: brasileirao
+        league_name:
+          type: string
+          example: Brasileirão Série A
+        year:
+          type: integer
+          example: 2026
+        round:
+          type: integer
+          example: 1
+        message:
+          type: string
+          example: Scraping job started successfully
+        log_file:
+          type: string
+          example: logs/scrape_brasileirao_2026_r1.log
+
+    ScrapeJob:
+      type: object
+      properties:
+        job_id:
+          type: string
+          example: scrape_brasileirao_2026_1_1738354845
+        status:
+          type: string
+          enum: [running, completed, cancelled]
+          example: completed
+        league:
+          type: string
+          example: brasileirao
+        league_name:
+          type: string
+          example: Brasileirão Série A
+        year:
+          type: integer
+          example: 2026
+        round:
+          type: integer
+          example: 1
+        started_at:
+          type: string
+          format: date-time
+          example: 2026-01-31T19:00:45Z
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: 2026-01-31T19:05:30Z
+        duration_seconds:
+          type: integer
+          nullable: true
+          example: 285
+        pid:
+          type: integer
+          example: 12345
+        log_file:
+          type: string
+          example: logs/scrape_brasileirao_2026_r1.log
+        matches_scraped:
+          type: integer
+          example: 10
+        matches_failed:
+          type: integer
+          example: 0

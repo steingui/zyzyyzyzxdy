@@ -40,3 +40,25 @@ def get_last_processed_round() -> int:
     finally:
         if conn:
             conn.close()
+
+def check_match_exists(url: str) -> bool:
+    """
+    Verifica se uma partida com a URL fonte já existe no banco.
+    """
+    conn = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Normaliza a URL removendo query params se necessário, mas aqui assume match exato
+        cursor.execute("SELECT id FROM partidas WHERE url_fonte = %s", (url,))
+        result = cursor.fetchone()
+        
+        return result is not None
+        
+    except Exception as e:
+        logger.error(f"Erro ao verificar existência da partida {url}: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()

@@ -22,12 +22,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-DEFAULT_URL_BASE = "https://www.ogol.com.br/competicao/brasileirao"
+DEFAULT_URL_BASE = "https://www.ogol.com.br/competicao"
 
-def get_round_matches(round_num: int = None):
-    url = DEFAULT_URL_BASE
+def get_round_matches(round_num: int = None, league_slug: str = "brasileirao"):
+    """
+    Fetch match URLs for a specific round of a league.
+    
+    Args:
+        round_num: Round/Rodada number (optional)
+        league_slug: League slug on ogol.com.br (default: brasileirao)
+    """
+    url = f"{DEFAULT_URL_BASE}/{league_slug}"
     if round_num:
-        url = f"{DEFAULT_URL_BASE}?jornada_in={round_num}"
+        url = f"{url}?jornada_in={round_num}"
         
     logger.info(f"Target URL: {url}")
     
@@ -77,11 +84,12 @@ def get_round_matches(round_num: int = None):
             browser.close()
 
 def main():
-    parser = argparse.ArgumentParser(description="Crawler de jogos da rodada")
+    parser = argparse.ArgumentParser(description="Crawler de jogos da rod ada")
     parser.add_argument("--round", type=int, help="Número da rodada (opcional)")
+    parser.add_argument("--league", default="brasileirao", help="League slug (default: brasileirao)")
     args = parser.parse_args()
     
-    matches = get_round_matches(args.round)
+    matches = get_round_matches(args.round, args.league)
     
     if matches:
         logger.info(f"Encontrados {len(matches)} jogos.")

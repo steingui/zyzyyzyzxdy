@@ -35,6 +35,50 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def get_or_create_season(cursor, league_slug: str, year: int) -> int:
+    """
+    Get or create season for league+year.
+    
+    Args:
+        cursor: database cursor
+        league_slug: ogol.com.br league slug (e.g., 'brasileirao', 'premier-league')
+        year: season year (e.g., 2026)
+    
+    Returns:
+        season_id
+    """
+    # Get league ID from ogol_slug
+    cursor.execute("SELECT id FROM leagues WHERE ogol_slug = %s", (league_slug,))
+    league_row = cursor.fetchone()
+    
+    if not league_row:
+        raise ValueError(f"League with ogol_slug '{league_slug}' not found in database")
+    
+    league_id = league_row['id']
+    
+    # Get or create season
+    cursor.execute("""
+        SELECT id FROM seasons 
+        WHERE league_id = %s AND year = %s
+    """, (league_id, year))
+    
+    season_row = cursor.fetchone()
+    
+    if season_row:
+        return season_row['id']
+    
+    # Create new season
+    logger.info(f"Creating new season: {league_slug} {year}")
+    cursor.execute("""
+        INSERT INTO seasons (league_id, year, is_current)
+        VALUES (%s, %s, TRUE)
+        RETURNING id
+    """, (league_id, year))
+    
+    return cursor.fetchone()['id']
+
+
+
 def get_connection():
     """
     Cria conexão com o banco de dados PostgreSQL.
@@ -127,7 +171,7 @@ def check_idempotency(cursor, rodada: int, time_casa_id: int, time_fora_id: int)
 
 
 def insert_partida(cursor, data: dict, time_casa_id: int, time_fora_id: int,
-                   estadio_id: Optional[int], arbitro_id: Optional[int]) -> int:
+                   estadio_id: Optional[int], arbitro_id: Optional[int], season_id: int) -> int:
     """
     Insere a partida ou atualiza se já existir.
     Salva dados extras na coluna JSONB metadata.
@@ -139,13 +183,13 @@ def insert_partida(cursor, data: dict, time_casa_id: int, time_fora_id: int,
     
     cursor.execute("""
         INSERT INTO partidas (
-            rodada, time_casa_id, time_fora_id, 
+            season_id, rodada, time_casa_id, time_fora_id, 
             gols_casa, gols_fora,
             gols_casa_intervalo, gols_fora_intervalo,
             data_hora, estadio_id, arbitro_id, publico, url_fonte, status,
             metadata
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'finished', %s)
-        ON CONFLICT (rodada, time_casa_id, time_fora_id) 
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'finished', %s)
+        ON CONFLICT (season_id, rodada, time_casa_id, time_fora_id) 
         DO UPDATE SET
             gols_casa = EXCLUDED.gols_casa,
             gols_fora = EXCLUDED.gols_fora,
@@ -153,6 +197,7 @@ def insert_partida(cursor, data: dict, time_casa_id: int, time_fora_id: int,
             updated_at = CURRENT_TIMESTAMP
         RETURNING id
     """, (
+        season_id,
         data['rodada'],
         time_casa_id,
         time_fora_id,
@@ -307,24 +352,27 @@ def insert_escalacoes(cursor, partida_id: int, escalacao: dict, time_id: int):
             nota = player.get('rating')
             qualidade = player.get('rating_qualidade')
             
-            # JSON stats
+            # JSON stats (include rating_qualidade here since column doesn't exist in table)
             detailed_stats = {}
             for key in ['defesa', 'passe', 'ataque']:
                 if key in player:
                     detailed_stats[key] = player[key]
+            
+            # Add rating_qualidade to stats JSON
+            if qualidade:
+                detailed_stats['rating_qualidade'] = qualidade
             
             stats_json = json.dumps(detailed_stats) if detailed_stats else '{}'
             
             cursor.execute("""
                 INSERT INTO escalacoes (
                     partida_id, jogador_id, time_id, titular, numero_camisa,
-                    nota, rating_qualidade, stats
+                    nota, stats
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (partida_id, jogador_id) 
                 DO UPDATE SET
                     nota = EXCLUDED.nota,
-                    rating_qualidade = EXCLUDED.rating_qualidade,
                     stats = EXCLUDED.stats
             """, (
                 partida_id, 
@@ -333,12 +381,13 @@ def insert_escalacoes(cursor, partida_id: int, escalacao: dict, time_id: int):
                 is_titular, 
                 numero,
                 nota,
-                qualidade,
                 stats_json
             ))
+            
+            logger.info(f"✅ Escalação inserida: {player.get('nome')} (Partida {partida_id}, Rating: {nota})")
 
 
-def process_input(data: dict) -> bool:
+def process_input(data: dict, league_slug: str = "brasileirao", year: int = 2026) -> bool:
     """
     Processa o JSON de entrada e persiste no banco.
     Regra S02: COMMIT apenas após validação completa.
@@ -348,6 +397,15 @@ def process_input(data: dict) -> bool:
     
     conn = get_connection()
     cursor = conn.cursor()
+    
+    try:
+        # Get or create season
+        season_id = get_or_create_season(cursor, league_slug, year)
+        logger.info(f"Using season_id={season_id} for {league_slug} {year}")
+    except Exception as e:
+        logger.error(f"Failed to get/create season: {e}")
+        conn.close()
+        return False
     
     try:
         # Buscar/criar entidades relacionadas
@@ -374,7 +432,7 @@ def process_input(data: dict) -> bool:
             )
 
         # Tenta inserir/atualizar partida (ON CONFLICT garante atomicidade)
-        partida_id = insert_partida(cursor, data, time_casa_id, time_fora_id, estadio_id, arbitro_id)
+        partida_id = insert_partida(cursor, data, time_casa_id, time_fora_id, estadio_id, arbitro_id, season_id)
         
         # Inserir estatísticas (ON CONFLICT DO UPDATE)
         if 'stats_home' in data or 'stats_away' in data:

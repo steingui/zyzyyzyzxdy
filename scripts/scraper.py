@@ -84,6 +84,103 @@ class OgolScraper:
         self.detailed = detailed
         self.data: Dict[str, Any] = {}
     
+    from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=4, max=10),
+        retry=retry_if_exception_type((PlaywrightTimeout, Exception)),
+        before_sleep=before_sleep_log(logger, logging.WARNING)
+    )
+    def _execute_scrape_logic(self, page, url: str):
+        """Core logic with retry support"""
+        # Carregar página e aguardar conteúdo inicial
+        page.goto(url, wait_until='domcontentloaded', timeout=NAVIGATION_TIMEOUT)
+        page.wait_for_timeout(JS_INITIAL_WAIT)
+        
+        remove_ads(page)
+        
+        # Scroll agressivo para forçar lazy loading
+        for scroll in INITIAL_SCROLL_POSITIONS:
+            page.evaluate(f'window.scrollTo(0, {scroll})')
+            page.wait_for_timeout(SCROLL_DELAY)
+            remove_ads(page)
+        
+        # Voltar ao topo e esperar estabilizar
+        scroll_to_top(page, STABILIZATION_WAIT)
+        
+        # Tentar esperar por elementos específicos (flexível)
+        try:
+            page.wait_for_selector('.graph-bar', timeout=ELEMENT_WAIT_TIMEOUT)
+        except Exception:
+            pass
+        
+        # === EXTRAÇÃO DE DADOS ===
+        
+        # 1. Info básica (sempre funciona)
+        self.data = extract_match_info(page)
+        self.data['url_fonte'] = url
+        
+        # 2. Estatísticas
+        stats = extract_statistics(page)
+        self.data.update(stats)
+        
+        # 3. Smart Scroll para seções críticas (Lineups e Eventos)
+        target_selectors = [
+            '.zz-container #game_report',  # Escalações (Layout Novo)
+            '.zz-module.game_matchup',     # Escalações (Layout Antigo)
+            '.match-header-scorers',       # Gols
+            '#event_summary'               # Eventos gerais
+        ]
+        
+        logger.info("Executando Smart Scroll para carregar seções...")
+        for selector in target_selectors:
+            try:
+                # Tenta localizar mas não falha se não existir (layout dinâmico)
+                loc = page.locator(selector).first
+                if loc.is_visible():
+                    loc.scroll_into_view_if_needed()
+                    page.wait_for_timeout(SCROLL_DELAY)
+            except Exception:
+                pass
+        
+        # Scroll final para o fundo para garantir footer/ads/scripts finais
+        page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
+        page.wait_for_timeout(STABILIZATION_WAIT)
+        remove_ads(page)
+
+        # Voltar um pouco para garantir que lineups não ficaram "acima" do view se footer for grande
+        page.evaluate('window.scrollBy(0, -500)')
+        page.wait_for_timeout(500)
+        
+        # 4. Eventos (gols + cartões)
+        events = extract_events(page)
+        if events:
+            self.data['eventos'] = events
+        
+        # 5. Escalações
+        lineups = extract_lineups(page)
+        self.data.update(lineups)
+        
+        # 6. Ratings dos jogadores (campo tático visual)
+        ratings = extract_player_ratings(page)
+        if ratings:
+            self.data.update(ratings)
+        
+        # 7. Stats detalhadas de cada jogador (opcional, lento)
+        if self.detailed:
+            logger.info("Extraindo stats detalhadas de jogadores (22 modais)...")
+            detailed_stats = extract_player_detailed_stats(page)
+            if detailed_stats:
+                self.data.update(detailed_stats)
+        
+        logger.info(f"Scraping concluído: {self.data.get('home_team', '?')} x {self.data.get('away_team', '?')}")
+        
+        # Unificar dados de jogadores para evitar redundância
+        self.data = merge_player_data(self.data)
+        
+        return self.data
+
     def scrape(self, url: str) -> Dict[str, Any]:
         """
         Executa o scraping completo de forma flexível.
@@ -112,97 +209,11 @@ class OgolScraper:
             page = context.new_page()
             
             try:
-                # Carregar página e aguardar conteúdo inicial
-                page.goto(url, wait_until='domcontentloaded', timeout=NAVIGATION_TIMEOUT)
-                page.wait_for_timeout(JS_INITIAL_WAIT)
-                
-                remove_ads(page)
-                
-                # Scroll agressivo para forçar lazy loading
-                for scroll in INITIAL_SCROLL_POSITIONS:
-                    page.evaluate(f'window.scrollTo(0, {scroll})')
-                    page.wait_for_timeout(SCROLL_DELAY)
-                    remove_ads(page)
-                
-                # Voltar ao topo e esperar estabilizar
-                scroll_to_top(page, STABILIZATION_WAIT)
-                
-                # Tentar esperar por elementos específicos (flexível)
-                try:
-                    page.wait_for_selector('.graph-bar', timeout=ELEMENT_WAIT_TIMEOUT)
-                except Exception:
-                    pass
-                
-                # === EXTRAÇÃO DE DADOS ===
-                
-                # 1. Info básica (sempre funciona)
-                self.data = extract_match_info(page)
-                self.data['url_fonte'] = url
-                
-                # 2. Estatísticas
-                stats = extract_statistics(page)
-                self.data.update(stats)
-                
-                # 3. Smart Scroll para seções críticas (Lineups e Eventos)
-                # Em vez de scroll cego, vamos garantir que elementos alvo estejam visíveis
-                target_selectors = [
-                    '.zz-container #game_report',  # Escalações (Layout Novo)
-                    '.zz-module.game_matchup',     # Escalações (Layout Antigo)
-                    '.match-header-scorers',       # Gols
-                    '#event_summary'               # Eventos gerais
-                ]
-                
-                logger.info("Executando Smart Scroll para carregar seções...")
-                for selector in target_selectors:
-                    try:
-                        # Tenta localizar mas não falha se não existir (layout dinâmico)
-                        loc = page.locator(selector).first
-                        if loc.is_visible():
-                            loc.scroll_into_view_if_needed()
-                            page.wait_for_timeout(SCROLL_DELAY)
-                    except Exception:
-                        pass
-                
-                # Scroll final para o fundo para garantir footer/ads/scripts finais
-                page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
-                page.wait_for_timeout(STABILIZATION_WAIT)
-                remove_ads(page)
-
-                # Voltar um pouco para garantir que lineups não ficaram "acima" do view se footer for grande
-                page.evaluate('window.scrollBy(0, -500)')
-                page.wait_for_timeout(500)
-                
-                # 4. Eventos (gols + cartões)
-                events = extract_events(page)
-                if events:
-                    self.data['eventos'] = events
-                
-                # 5. Escalações
-                lineups = extract_lineups(page)
-                self.data.update(lineups)
-                
-                # 6. Ratings dos jogadores (campo tático visual)
-                ratings = extract_player_ratings(page)
-                if ratings:
-                    self.data.update(ratings)
-                
-                # 7. Stats detalhadas de cada jogador (opcional, lento)
-                if self.detailed:
-                    logger.info("Extraindo stats detalhadas de jogadores (22 modais)...")
-                    detailed_stats = extract_player_detailed_stats(page)
-                    if detailed_stats:
-                        self.data.update(detailed_stats)
-                
-                logger.info(f"Scraping concluído: {self.data.get('home_team', '?')} x {self.data.get('away_team', '?')}")
-                
-                # Unificar dados de jogadores para evitar redundância
-                self.data = merge_player_data(self.data)
-                
-            except PlaywrightTimeout as e:
-                logger.error(f"Timeout ao acessar {url}: {e}")
+                # Chama a lógica com retry
+                self._execute_scrape_logic(page, url)
                 
             except Exception as e:
-                logger.error(f"Erro no scraping: {e}")
+                logger.error(f"Erro fatal no scraping após retries: {e}")
                 
             finally:
                 browser.close()

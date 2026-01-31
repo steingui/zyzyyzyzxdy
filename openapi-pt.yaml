@@ -20,7 +20,7 @@ info:
     - Identificar padrões de pontuação e tendências
     - Avaliar consistência dos times ao longo das rodadas
     
-  version: 3.0.0
+  version: 3.1.0
   contact:
     name: BR-Statistics Hub
     url: https://github.com/steingui/zyzyyzyzxdy
@@ -36,8 +36,8 @@ tags:
     description: Endpoints gerais de saúde e status da API
   - name: Partidas
     description: |
-      Obtenha informações detalhadas de partidas incluindo placares, estatísticas e eventos.
-      Essencial para analisar desempenho passado e prever resultados futuros.
+      Obtenha informações detalhadas sobre partidas incluindo placar, estatísticas e eventos.
+      Essencial para análise de desempenho passado e previsão de resultados futuros.
   - name: Times
     description: |
       Acesse perfis de times e dados históricos.
@@ -45,7 +45,11 @@ tags:
   - name: Análises
     description: |
       Estatísticas avançadas e rankings usando métricas de Expected Goals (xG).
-      Estas métricas ajudam a identificar times que estão tendo desempenho acima ou abaixo do esperado.
+      Essas métricas ajudam a identificar times que estão performando acima ou abaixo de seus resultados reais.
+  - name: Scraping
+    description: |
+      Controle remoto do pipeline de scraping. Dispare jobs de coleta de dados para qualquer liga/rodada via HTTP.
+      Monitore status de jobs e acompanhe o progresso do scraping em tempo real.
 
 paths:
   /health:
@@ -260,14 +264,197 @@ paths:
         - Compare xG de partidas individuais com a média da liga para identificar outliers
         - Entenda se esta temporada é de muitos gols ou defensiva
         
-        **Exemplo de uso:** Média da liga é 2.8 gols → Ambos times têm média de 1.5 xG → Total 3.0 xG → Aposte Over 2.5 gols
+        **Exemplo de uso:** Média da liga é 2.8 gols → Ambos os times têm média de 1.5 xG → Total 3.0 xG → Aposte em Acima de 2.5 gols
       responses:
         '200':
-          description: Resumo estatístico do campeonato
+          description: Estatísticas resumidas do campeonato
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Resumo'
+                $ref: '#/components/schemas/Summary'
+
+  /api/scrape:
+    post:
+      tags:
+        - Scraping
+      summary: Iniciar job de scraping para uma liga/rodada específica
+      description: |
+        **O que faz:** Dispara o pipeline de scraping para coletar dados de partidas do ogol.com.br
+        
+        **Parâmetros:**
+        - **league**: Slug da liga (ex: "brasileirao", "premier-league", "la-liga")
+        - **year**: Ano da temporada (ex: 2026)
+        - **round**: Número da rodada (1-38)
+        
+        **Retorna:** ID do job para rastreamento do progresso
+        
+        **Como funciona:**
+        1. Valida se a liga existe no banco de dados
+        2. Valida se a rodada está dentro do máximo de rodadas da liga
+        3. Inicia subprocess assíncrono para scraping
+        4. Retorna imediatamente com job_id
+        5. Verifique o status com GET /api/scrape/status/{job_id}
+        
+        **Nota:** Job roda em background. Não iniciará jobs duplicados para mesma liga/rodada.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - round
+              properties:
+                league:
+                  type: string
+                  default: brasileirao
+                  example: brasileirao
+                year:
+                  type: integer
+                  default: 2026
+                  example: 2026
+                  example: 1
+                sync:
+                  type: boolean
+                  default: false
+                  example: false
+                  description: Se verdadeiro, executa sincronicamente (aguarda finalização)
+      responses:
+        '202':
+          description: Job de scraping iniciado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScrapeJobStarted'
+        '400':
+          description: Parâmetros inválidos (rodada ausente, liga inválida, ou rodada fora do limite)
+        '409':
+          description: Job já em execução para esta liga/rodada
+
+  /api/scrape/status/{job_id}:
+    get:
+      tags:
+        - Scraping
+      summary: Obter status de um job de scraping
+      description: |
+        **O que faz:** Verifica se seu job de scraping ainda está rodando ou foi concluído
+        
+        **Valores de status:**
+        - **running**: Job está ativamente fazendo scraping de partidas
+        - **completed**: Job finalizado com sucesso
+        - **cancelled**: Job foi cancelado pelo usuário
+        
+        **Resposta inclui:**
+        - Timestamps de início/conclusão
+        - Duração em segundos
+        - Contagem de partidas scraped/falhadas
+        - Caminho do arquivo de log para troubleshooting
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          description: Identificador do job retornado por POST /api/scrape
+          schema:
+            type: string
+            example: scrape_brasileirao_2026_1_1738354845
+      responses:
+        '200':
+          description: Status e detalhes do job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScrapeJob'
+        '404':
+          description: Job não encontrado
+
+  /api/scrape/jobs:
+    get:
+      tags:
+        - Scraping
+      summary: Listar todos os jobs de scraping
+      description: |
+        **O que faz:** Obtém lista de todos os jobs de scraping (em execução e concluídos)
+        
+        **Opções de filtro:**
+        - Por status (running, completed, cancelled)
+        - Por liga
+        - Limitar resultados (padrão: 50, máximo: 100)
+        
+        **Ordenação:** Jobs mais recentes primeiro
+      parameters:
+        - name: status
+          in: query
+          description: Filtrar por status do job
+          required: false
+          schema:
+            type: string
+            enum: [running, completed, cancelled]
+        - name: league
+          in: query
+          description: Filtrar por slug da liga
+          required: false
+          schema:
+            type: string
+            example: brasileirao
+        - name: limit
+          in: query
+          description: Número máximo de resultados
+          required: false
+          schema:
+            type: integer
+            default: 50
+            maximum: 100
+      responses:
+        '200':
+          description: Lista de jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  jobs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ScrapeJob'
+
+  /api/scrape/cancel/{job_id}:
+    post:
+      tags:
+        - Scraping
+      summary: Cancelar um job de scraping em execução
+      description: |
+        **O que faz:** Para um job de scraping que está atualmente em execução
+        
+        **Nota:** Só pode cancelar jobs com status="running"
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          description: Identificador do job a cancelar
+          schema:
+            type: string
+            example: scrape_brasileirao_2026_1_1738354845
+      responses:
+        '200':
+          description: Job cancelado com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: cancelled
+                  job_id:
+                    type: string
+                  message:
+                    type: string
+        '400':
+          description: Job não está em execução
+        '404':
+          description: Job não encontrado
 
 components:
   schemas:
@@ -412,7 +599,7 @@ components:
           format: float
           example: 1.22
 
-    Resumo:
+    Summary:
       type: object
       properties:
         total_matches:
@@ -425,3 +612,79 @@ components:
           type: number
           format: float
           example: 2.5
+
+    ScrapeJobStarted:
+      type: object
+      properties:
+        status:
+          type: string
+          example: started
+        job_id:
+          type: string
+          example: scrape_brasileirao_2026_1_1738354845
+        league:
+          type: string
+          example: brasileirao
+        league_name:
+          type: string
+          example: Brasileirão Série A
+        year:
+          type: integer
+          example: 2026
+        round:
+          type: integer
+          example: 1
+        message:
+          type: string
+          example: Scraping job started successfully
+        log_file:
+          type: string
+          example: logs/scrape_brasileirao_2026_r1.log
+
+    ScrapeJob:
+      type: object
+      properties:
+        job_id:
+          type: string
+          example: scrape_brasileirao_2026_1_1738354845
+        status:
+          type: string
+          enum: [running, completed, cancelled]
+          example: completed
+        league:
+          type: string
+          example: brasileirao
+        league_name:
+          type: string
+          example: Brasileirão Série A
+        year:
+          type: integer
+          example: 2026
+        round:
+          type: integer
+          example: 1
+        started_at:
+          type: string
+          format: date-time
+          example: 2026-01-31T19:00:45Z
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: 2026-01-31T19:05:30Z
+        duration_seconds:
+          type: integer
+          nullable: true
+          example: 285
+        pid:
+          type: integer
+          example: 12345
+        log_file:
+          type: string
+          example: logs/scrape_brasileirao_2026_r1.log
+        matches_scraped:
+          type: integer
+          example: 10
+        matches_failed:
+          type: integer
+          example: 0
