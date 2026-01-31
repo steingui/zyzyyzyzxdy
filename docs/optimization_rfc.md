@@ -1,6 +1,6 @@
 # RFC: Otimizações da Codebase BR-Statistics Hub
 
-**Status:** Proposta  
+**Status:** Em Implementação (Parcialmente Concluído)
 **Data:** 2026-01-31  
 **Autor:** Sistema  
 
@@ -39,7 +39,7 @@ r.hset('jobs', job_id, json.dumps(job_data))
 
 ---
 
-### 2. **Async Database Queries com SQLAlchemy + asyncpg**
+### 2. **Async Database Queries com SQLAlchemy + asyncpg** (✅ IMPLEMENTADO v3.4.0)
 
 **Problema:** Queries síncronas bloqueiam o event loop do Flask
 
@@ -67,7 +67,7 @@ async def get_matches(round_num: int):
 
 ---
 
-### 3. **Implementar Cache Layer (Redis)**
+### 3. **Implementar Cache Layer (Redis)** (✅ IMPLEMENTADO v3.3.0)
 
 **Problema:** Queries repetitivas sem cache
 
@@ -96,7 +96,7 @@ def list_teams():
 
 ---
 
-### 4. **N+1 Queries - Eager Loading**
+### 4. **N+1 Queries - Eager Loading** (✅ IMPLEMENTADO v3.4.0)
 
 **Problema:** Queries N+1 em `/api/matches/{id}`
 

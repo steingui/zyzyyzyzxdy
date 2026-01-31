@@ -10,6 +10,7 @@ class Config:
         database_url = database_url.replace("postgres://", "postgresql://", 1)
         
     SQLALCHEMY_DATABASE_URI = database_url
+    SQLALCHEMY_ASYNC_DATABASE_URI = database_url.replace("postgresql://", "postgresql+asyncpg://")
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ECHO = os.getenv('SQLALCHEMY_ECHO', 'False').lower() == 'true'
     
