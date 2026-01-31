@@ -51,5 +51,7 @@ echo ""
 # Security: Run with production settings
 export FLASK_APP=api_app.py
 export FLASK_ENV=production
+# Default to localhost Redis for local execution if not set in .env
+export CACHE_REDIS_URL=${CACHE_REDIS_URL:-redis://localhost:6379/0}
 
 flask run --host=0.0.0.0 --port=$PORT

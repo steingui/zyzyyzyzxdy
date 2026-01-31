@@ -12,6 +12,11 @@ class Config:
     SQLALCHEMY_DATABASE_URI = database_url
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
+    # Cache Configuration
+    CACHE_TYPE = os.getenv('CACHE_TYPE', 'RedisCache')
+    CACHE_REDIS_URL = os.getenv('CACHE_REDIS_URL', 'redis://redis:6379/0')
+    CACHE_DEFAULT_TIMEOUT = 300
+    
     # Security Configuration
     SECRET_KEY = os.getenv('SECRET_KEY')
     if not SECRET_KEY:

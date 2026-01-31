@@ -22,6 +22,22 @@ services:
     networks:
       - brasileirao-net
 
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: brasileirao-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - brasileirao-net
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   # Scraper
   scraper:
     build: .
@@ -41,6 +57,7 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
 
 
 networks:

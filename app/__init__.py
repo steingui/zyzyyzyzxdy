@@ -44,9 +44,8 @@ def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
     
-    # Configurar cache local
-    app.config['CACHE_TYPE'] = 'SimpleCache'
-    app.config['CACHE_DEFAULT_TIMEOUT'] = 300  # 5 minutos
+    # Configurar cache (agora usa as configurações do config.py)
+    # app.config['CACHE_TYPE'] = 'SimpleCache' -> Removido em favor da configuração via Config object
     
     # Security: CORS Configuration
     # Adjust 'origins' for production to whitelist only your domains
