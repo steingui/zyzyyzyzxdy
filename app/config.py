@@ -11,6 +11,7 @@ class Config:
         
     SQLALCHEMY_DATABASE_URI = database_url
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SQLALCHEMY_ECHO = os.getenv('SQLALCHEMY_ECHO', 'False').lower() == 'true'
     
     # Cache Configuration
     CACHE_TYPE = os.getenv('CACHE_TYPE', 'RedisCache')

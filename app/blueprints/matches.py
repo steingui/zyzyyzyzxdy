@@ -2,6 +2,7 @@ from flask import Blueprint, jsonify, request, current_app
 from app.models import Partida
 from app.schemas import PartidaSchema
 from app import cache
+from sqlalchemy.orm import joinedload, selectinload
 
 matches_bp = Blueprint('matches', __name__)
 match_schema = PartidaSchema()
@@ -20,7 +21,16 @@ def get_matches():
         if time_id is not None and time_id < 1:
             return jsonify({"error": "Invalid time_id: must be positive"}), 400
         
-        query = Partida.query
+        # Otimização: Eager Loading para evitar N+1 queries
+        query = Partida.query.options(
+            joinedload(Partida.time_casa),
+            joinedload(Partida.time_fora),
+            joinedload(Partida.estadio),
+            joinedload(Partida.arbitro),
+            joinedload(Partida.estatisticas),
+            # selectinload é mais eficiente para conexões One-to-Many grandes
+            selectinload(Partida.eventos)
+        )
         
         if rodada:
             query = query.filter_by(rodada=rodada)
@@ -43,7 +53,16 @@ def get_match(match_id):
         if match_id < 1:
             return jsonify({"error": "Invalid match_id: must be positive"}), 400
             
-        partida = Partida.query.get_or_404(match_id)
+        # Otimização: Eager Loading
+        partida = Partida.query.options(
+            joinedload(Partida.time_casa),
+            joinedload(Partida.time_fora),
+            joinedload(Partida.estadio),
+            joinedload(Partida.arbitro),
+            joinedload(Partida.estatisticas),
+            selectinload(Partida.eventos)
+        ).filter_by(id=match_id).first_or_404()
+        
         current_app.logger.info(f"Fetched match details: ID={match_id}")
         return jsonify(match_schema.dump(partida))
     except NotFound:
