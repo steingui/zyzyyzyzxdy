@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-scrape.py - API endpoints for remote scraping pipeline triggering
+scrape.py - API endpoints for remote scraping pipeline triggering with Redis
 
-Queue-based system:
-- POST /api/scrape enqueues job (returns 202 immediately)
-- Background worker thread processes queue sequentially
-- Logs appear in API console in real-time
-- Prevents overwhelming the server with concurrent scrapes
+Queue-based system (Redis):
+- POST /api/scrape enqueues job to 'scrape:queue' (returns 202 immediately)
+- Background worker thread processes queue from Redis
+- Jobs metadata stored in Redis Hash 'scrape:jobs'
+- Persistent across restarts
 
 Endpoints:
 - POST /api/scrape - Enqueue a scraping job
@@ -21,7 +21,7 @@ import json
 import time
 import signal
 import threading
-import queue
+import redis
 from pathlib import Path
 from datetime import datetime
 from flask import Blueprint, request, jsonify, current_app
@@ -29,35 +29,68 @@ from app.models import db, League
 
 scrape_bp = Blueprint('scrape', __name__, url_prefix='/api/scrape')
 
-JOBS_FILE = Path('data/scrape_jobs.json')
-JOBS_FILE.parent.mkdir(exist_ok=True)
+# Redis Configuration
+REDIS_HOST = os.getenv('REDIS_HOST', 'localhost')
+REDIS_PORT = int(os.getenv('REDIS_PORT', 6379))
+REDIS_DB = int(os.getenv('REDIS_DB', 0))
 
-# Global task queue and worker thread
-scrape_queue = queue.Queue()
+# Initialize Redis
+try:
+    redis_client = redis.Redis(
+        host=REDIS_HOST, 
+        port=REDIS_PORT, 
+        db=REDIS_DB, 
+        decode_responses=True
+    )
+    # Ping to check connection
+    redis_client.ping()
+    print(f"✅ Redis connected at {REDIS_HOST}:{REDIS_PORT}")
+except Exception as e:
+    print(f"❌ Failed to connect to Redis: {e}")
+    # We continue, but worker will fail loop if not connected
+
+# Redis Keys
+KEY_JOBS = "scrape:jobs"
+KEY_QUEUE = "scrape:queue"
+
+# Global worker thread control
 worker_thread = None
 worker_running = False
 
 
+def get_job(job_id):
+    """Get single job from Redis"""
+    try:
+        data = redis_client.hget(KEY_JOBS, job_id)
+        return json.loads(data) if data else None
+    except Exception as e:
+        print(f"Redis error in get_job: {e}")
+        return None
+
+
+def save_job(job_data):
+    """Save/Update single job in Redis"""
+    try:
+        job_id = job_data['job_id']
+        redis_client.hset(KEY_JOBS, job_id, json.dumps(job_data))
+    except Exception as e:
+        print(f"Redis error in save_job: {e}")
+
+
 def load_jobs():
-    """Load jobs from JSON file"""
-    if JOBS_FILE.exists():
-        try:
-            with open(JOBS_FILE, 'r') as f:
-                return json.load(f)
-        except json.JSONDecodeError:
-            current_app.logger.warning("Invalid jobs file, starting fresh")
-            return {}
-    return {}
-
-
-def save_jobs(jobs):
-    """Save jobs to JSON file"""
-    with open(JOBS_FILE, 'w') as f:
-        json.dump(jobs, f, indent=2)
+    """Load all jobs from Redis"""
+    try:
+        raw = redis_client.hgetall(KEY_JOBS)
+        return {k: json.loads(v) for k, v in raw.items()}
+    except Exception as e:
+        print(f"Redis error in load_jobs: {e}")
+        return {}
 
 
 def is_process_running(pid):
     """Check if process is still running"""
+    if not pid:
+        return False
     try:
         os.kill(pid, 0)
         return True
@@ -67,25 +100,41 @@ def is_process_running(pid):
 
 def scrape_worker():
     """
-    Background worker that processes scraping jobs from the queue.
-    Jobs are processed sequentially (one at a time) with live logs.
+    Background worker that processes scraping jobs from Redis queue.
     """
     global worker_running
     worker_running = True
     
-    print("🔧 Scraping worker thread started")
+    print("🔧 Scraping worker thread started (Redis backed)")
     
     while worker_running:
         try:
-            # Wait for job (blocks until available, timeout for clean shutdown)
-            job_data = scrape_queue.get(timeout=1)
+            # BLPOP blocks until item is available or timeout
+            # Returns tuple (key, value) or None
+            item = redis_client.blpop(KEY_QUEUE, timeout=1)
+            
+            if not item:
+                continue
+                
+            _, job_json = item
+            job_data = json.loads(job_json)
             
             job_id = job_data['job_id']
-            league_slug = job_data['league']
-            year = job_data['year']
-            round_num = job_data['round']
-            log_file = job_data['log_file']
-            cmd = job_data['cmd']
+            # Refresh job data from Hash to get latest status
+            current_job = get_job(job_id)
+            if current_job and current_job.get('status') == 'cancelled':
+                print(f"⏭️  Skipping cancelled job: {job_id}")
+                continue
+
+            # If job not in Hash, use the one from queue (fallback)
+            if not current_job:
+                current_job = job_data
+
+            league_slug = current_job['league']
+            year = current_job['year']
+            round_num = current_job['round']
+            log_file = current_job['log_file']
+            cmd = current_job['cmd']
             
             print(f"\n{'='*60}")
             print(f"🚀 PROCESSING JOB: {job_id}")
@@ -95,11 +144,9 @@ def scrape_worker():
             print(f"{'='*60}\n")
             
             # Update job status to running
-            jobs = load_jobs()
-            if job_id in jobs:
-                jobs[job_id]['status'] = 'processing'
-                jobs[job_id]['processing_started_at'] = datetime.utcnow().isoformat() + 'Z'
-                save_jobs(jobs)
+            current_job['status'] = 'processing'
+            current_job['processing_started_at'] = datetime.utcnow().isoformat() + 'Z'
+            save_job(current_job)
             
             # Run scraping with live output to console
             process = subprocess.Popen(
@@ -111,6 +158,10 @@ def scrape_worker():
                 bufsize=1
             )
             
+            # Save PID to allow cancellation
+            current_job['pid'] = process.pid
+            save_job(current_job)
+            
             # Stream logs to console in real-time
             for line in process.stdout:
                 print(f"[SCRAPE] {line.rstrip()}")
@@ -119,32 +170,31 @@ def scrape_worker():
             exit_code = process.returncode
             
             # Update job status
-            jobs = load_jobs()
-            if job_id in jobs:
-                jobs[job_id]['status'] = 'completed' if exit_code == 0 else 'failed'
-                jobs[job_id]['completed_at'] = datetime.utcnow().isoformat() + 'Z'
-                jobs[job_id]['exit_code'] = exit_code
-                
-                if 'processing_started_at' in jobs[job_id] and 'completed_at' in jobs[job_id]:
-                    start = datetime.fromisoformat(jobs[job_id]['processing_started_at'].replace('Z', ''))
-                    end = datetime.fromisoformat(jobs[job_id]['completed_at'].replace('Z', ''))
-                    jobs[job_id]['duration_seconds'] = int((end - start).total_seconds())
-                
-                save_jobs(jobs)
+            current_job = get_job(job_id) or current_job # reload in case of updates
+            
+            current_job['status'] = 'completed' if exit_code == 0 else 'failed'
+            current_job['completed_at'] = datetime.utcnow().isoformat() + 'Z'
+            current_job['exit_code'] = exit_code
+            
+            if 'processing_started_at' in current_job and 'completed_at' in current_job:
+                start = datetime.fromisoformat(current_job['processing_started_at'].replace('Z', ''))
+                end = datetime.fromisoformat(current_job['completed_at'].replace('Z', ''))
+                current_job['duration_seconds'] = int((end - start).total_seconds())
+            
+            save_job(current_job)
             
             print(f"\n{'='*60}")
             print(f"{'✅' if exit_code == 0 else '❌'} JOB COMPLETED: {job_id}")
             print(f"Exit code: {exit_code}")
             print(f"{'='*60}\n")
             
-            scrape_queue.task_done()
-            
-        except queue.Empty:
-            # Timeout, continue loop (allows clean shutdown)
-            continue
+        except redis.ConnectionError:
+            print("❌ Redis connection lost in worker. Retrying...")
+            time.sleep(5)
         except Exception as e:
             print(f"❌ Worker error: {e}")
-            scrape_queue.task_done()
+            import traceback
+            traceback.print_exc()
     
     print("🛑 Scraping worker thread stopped")
 
@@ -166,31 +216,14 @@ start_worker()
 
 @scrape_bp.route('', methods=['POST'])
 def start_scrape():
-    """
-    Start a scraping job for league/round
-    
-    Request Body:
-    {
-        "league": "brasileirao",  // ogol_slug from leagues table
-        "year": 2026,
-        "round": 1,
-        "sync": false  // NEW: if true, runs synchronously with live logs (blocks API)
-    }
-    
-    Returns:
-        202: Job started successfully (async mode)
-        200: Job completed successfully (sync mode)
-        400: Invalid parameters
-        409: Job already running for this league/round
-        429: Rate limit exceeded
-    """
+    """Start a scraping job"""
     data = request.get_json()
     
     # Validate input
     league_slug = data.get('league', 'brasileirao')
     year = data.get('year', 2026)
     round_num = data.get('round')
-    sync_mode = data.get('sync', False)  # NEW: sync mode flag
+    sync_mode = data.get('sync', False)
     
     if not round_num:
         return jsonify({"error": "round is required"}), 400
@@ -212,22 +245,21 @@ def start_scrape():
             "error": f"Round {round_num} exceeds maximum for {league.name} ({league.num_rounds} rounds)"
         }), 400
     
-    # Check if already running
+    # Check if already running (Redis)
     jobs = load_jobs()
-    # Check for duplicate jobs (jobs is a list)
     for existing_job in jobs.values():
         if (existing_job.get('league') == league_slug and 
             existing_job.get('year') == year and 
             existing_job.get('round') == round_num and 
             existing_job.get('status') in ['queued', 'processing']):
             
+            # Verify if really processing (stale check) - logic simplified for phase 1 Redis
             current_app.logger.warning(f"Duplicate job detected: {existing_job.get('job_id')}")
             return jsonify({
-                "message": "Job already exists in queue",
+                "message": "Job already exists in queue/processing",
                 "job_id": existing_job.get('job_id'),
-                "status": existing_job.get('status'),
-                "queue_position": existing_job.get('queue_position')
-            }), 409  # Conflict
+                "status": existing_job.get('status')
+            }), 409
   
     # Create job ID
     timestamp = int(time.time())
@@ -238,7 +270,7 @@ def start_scrape():
     log_dir.mkdir(exist_ok=True)
     log_file = log_dir / f"scrape_{league_slug}_{year}_r{round_num}.log"
     
-    # Start subprocess
+    # Command
     cmd = [
         "python3", "scripts/run_batch.py",
         str(round_num),
@@ -247,47 +279,32 @@ def start_scrape():
     ]
     
     current_app.logger.info(f"Enqueuing scrape job: {job_id}")
-    current_app.logger.info(f"Command: {' '.join(cmd)}")
-    current_app.logger.info(f"Queue size: {scrape_queue.qsize()}")
     
     try:
-        # Enqueue job (non-blocking)
         job_data = {
             'job_id': job_id,
             'league': league_slug,
+            'league_name': league.name,
             'year': year,
             'round': round_num,
+            'status': 'queued',
+            'enqueued_at': datetime.utcnow().isoformat() + 'Z',
             'log_file': str(log_file),
-            'cmd': cmd
+            'cmd': cmd,
+            'matches_scraped': 0,
+            'matches_failed': 0
         }
         
-        scrape_queue.put(job_data)
+        # Save to Redis Metadata
+        save_job(job_data)
         
-        # Save job metadata
-        jobs[job_id] = {
-            "job_id": job_id,
-            "status": "queued",
-            "league": league_slug,
-            "league_name": league.name,
-            "year": year,
-            "round": round_num,
-            "enqueued_at": datetime.utcnow().isoformat() + 'Z',
-            "queue_position": scrape_queue.qsize(),
-            "log_file": str(log_file),
-            "matches_scraped": 0,
-            "matches_failed": 0
-        }
-        save_jobs(jobs)
+        # Push to Redis Queue
+        redis_client.rpush(KEY_QUEUE, json.dumps(job_data))
         
         return jsonify({
             "status": "queued",
             "job_id": job_id,
-            "league": league_slug,
-            "league_name": league.name,
-            "year": year,
-            "round": round_num,
-            "message": "Job enqueued successfully. Worker will process it soon.",
-            "queue_position": scrape_queue.qsize(),
+            "message": "Job enqueued successfully (Redis).",
             "log_file": str(log_file)
         }), 202
         
@@ -301,50 +318,27 @@ def start_scrape():
 
 @scrape_bp.route('/status/<job_id>', methods=['GET'])
 def get_status(job_id):
-    """
-    Get status of a scraping job
-    
-    Returns:
-        200: Job status
-        404: Job not found
-    """
-    jobs = load_jobs()
-    job = jobs.get(job_id)
+    """Get status of a scraping job from Redis"""
+    job = get_job(job_id)
     
     if not job:
         return jsonify({"error": "Job not found"}), 404
     
-    # Update status if process finished
-    if job['status'] == 'running':
-        if not is_process_running(job.get('pid', 0)):
-            job['status'] = 'completed'
+    # Clean up stale jobs
+    if job.get('status') == 'processing':
+        pid = job.get('pid')
+        if pid and not is_process_running(pid):
+            # Process died? Mark completed/failed
+            job['status'] = 'completed' # Assume success/finished logic for now
             job['completed_at'] = datetime.utcnow().isoformat() + 'Z'
-            
-            # Calculate duration
-            if 'started_at' in job and 'completed_at' in job:
-                start = datetime.fromisoformat(job['started_at'].replace('Z', ''))
-                end = datetime.fromisoformat(job['completed_at'].replace('Z', ''))
-                job['duration_seconds'] = int((end - start).total_seconds())
-            
-            jobs[job_id] = job
-            save_jobs(jobs)
+            save_job(job)
     
     return jsonify(job)
 
 
 @scrape_bp.route('/jobs', methods=['GET'])
 def list_jobs():
-    """
-    List all scraping jobs
-    
-    Query params:
-    - status: filter by status (running, completed, failed)
-    - league: filter by league
-    - limit: max results (default: 50)
-    
-    Returns:
-        200: List of jobs
-    """
+    """List all scraping jobs from Redis"""
     jobs = load_jobs()
     
     # Filters
@@ -352,25 +346,16 @@ def list_jobs():
     league_filter = request.args.get('league')
     limit = int(request.args.get('limit', 50))
     
-    # Update running jobs status
-    for job_id, job in jobs.items():
-        if job['status'] == 'running' and not is_process_running(job.get('pid', 0)):
-            job['status'] = 'completed'
-            job['completed_at'] = datetime.utcnow().isoformat() + 'Z'
-    
-    save_jobs(jobs)
-    
-    # Apply filters
     filtered_jobs = list(jobs.values())
     
     if status_filter:
-        filtered_jobs = [j for j in filtered_jobs if j['status'] == status_filter]
+        filtered_jobs = [j for j in filtered_jobs if j.get('status') == status_filter]
     
     if league_filter:
-        filtered_jobs = [j for j in filtered_jobs if j['league'] == league_filter]
+        filtered_jobs = [j for j in filtered_jobs if j.get('league') == league_filter]
     
-    # Sort by started_at desc
-    filtered_jobs.sort(key=lambda x: x.get('started_at', ''), reverse=True)
+    # Sort by enqueued_at desc (newest first)
+    filtered_jobs.sort(key=lambda x: x.get('enqueued_at', ''), reverse=True)
     
     # Limit
     filtered_jobs = filtered_jobs[:limit]
@@ -383,88 +368,51 @@ def list_jobs():
 
 @scrape_bp.route('/cancel/<job_id>', methods=['POST'])
 def cancel_job(job_id):
-    """
-    Cancel a running scraping job
-    
-    Returns:
-        200: Job cancelled
-        404: Job not found
-        400: Job not running
-    """
-    jobs = load_jobs()
-    job = jobs.get(job_id)
+    """Cancel a running scraping job"""
+    job = get_job(job_id)
     
     if not job:
         return jsonify({"error": "Job not found"}), 404
     
-    if job['status'] != 'running':
+    if job.get('status') not in ['running', 'processing']:
         return jsonify({"error": "Job is not running"}), 400
     
     pid = job.get('pid')
     if pid and is_process_running(pid):
         try:
-            # Kill process group
             os.killpg(os.getpgid(pid), signal.SIGTERM)
-            
-            job['status'] = 'cancelled'
-            job['cancelled_at'] = datetime.utcnow().isoformat() + 'Z'
-            jobs[job_id] = job
-            save_jobs(jobs)
-            
-            current_app.logger.info(f"Cancelled job: {job_id}")
-            
-            return jsonify({
-                "status": "cancelled",
-                "job_id": job_id,
-                "message": "Job cancelled successfully"
-            })
+            current_app.logger.info(f"Sent SIGTERM to process group {pid}")
         except Exception as e:
-            current_app.logger.error(f"Failed to cancel job {job_id}: {e}")
-            return jsonify({
-                "error": "Failed to cancel job",
-                "details": str(e)
-            }), 500
-    else:
-        job['status'] = 'completed'
-        jobs[job_id] = job
-        save_jobs(jobs)
-        
-        return jsonify({
-            "error": "Process already finished"
-        }), 400
+            current_app.logger.warning(f"Failed to kill process {pid}: {e}")
+    
+    job['status'] = 'cancelled'
+    job['cancelled_at'] = datetime.utcnow().isoformat() + 'Z'
+    save_job(job)
+    
+    return jsonify({
+        "status": "cancelled",
+        "job_id": job_id,
+        "message": "Job cancelled successfully"
+    })
 
 
 @scrape_bp.route('/queue', methods=['GET'])
 def get_queue_status():
-    """
-    Get current queue status
-    
-    Returns:
-        200: Queue information
-    """
+    """Get current queue status"""
+    try:
+        q_size = redis_client.llen(KEY_QUEUE)
+    except:
+        q_size = -1
+        
     jobs = load_jobs()
-    
-    queued_jobs = [
-        {
-            'job_id': job['job_id'],
-            'league': job['league'],
-            'year': job['year'],
-            'round': job['round'],
-            'enqueued_at': job.get('enqueued_at'),
-            'queue_position': idx + 1
-        }
-        for idx, (job_id, job) in enumerate(jobs.items())
-        if job.get('status') == 'queued'
-    ]
-    
     processing_job = next(
         (job for job in jobs.values() if job.get('status') == 'processing'),
         None
     )
     
+    # Note: 'worker_alive' is local to this thread, works for single instance
     return jsonify({
-        "queue_size": scrape_queue.qsize(),
-        "queued_jobs": queued_jobs,
+        "queue_size": q_size,
         "processing_job": processing_job,
         "worker_running": worker_running,
         "worker_alive": worker_thread.is_alive() if worker_thread else False

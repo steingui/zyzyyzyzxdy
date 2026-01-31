@@ -97,8 +97,9 @@ Adapta endpoints REST públicos para suportar múltiplas ligas:
 
 - **Backend:** Flask, SQLAlchemy, Marshmallow
 - **Database:** PostgreSQL (Render)
+- **Cache/Queue:** Redis (Required for persistence)
 - **Scraping:** Playwright, BeautifulSoup
-- **Queue:** Python threading.Queue (→ Celery proposto)
+- **Queue:** Redis List + Hash
 - **Docs:** OpenAPI/Swagger UI
 
 ---
