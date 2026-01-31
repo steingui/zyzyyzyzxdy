@@ -36,11 +36,15 @@ A plataforma segue o padrão de **Pipeline ETL (Extract, Load, Transform)**:
    DATABASE_URL=postgres://user:pass@host:port/db?sslmode=verify-full&sslrootcert=certs/global-bundle.pem
    ```
 
-## 📊 Visualização
-Para verificar o estado atual do banco e análises de performance:
-```bash
-python3 scripts/view_rds.py
-```
+## 📊 Execução e Visualização
+1. **Rodar a API (REST)**:
+   ```bash
+   ./run_api.sh
+   ```
+2. **Visualização Rápida no Terminal**:
+   ```bash
+   python3 scripts/view_rds.py
+   ```
 
 ---
 *Este projeto foi desenvolvido para fins de análise estatística esportiva.*
