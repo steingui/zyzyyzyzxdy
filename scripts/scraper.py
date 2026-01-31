@@ -51,6 +51,7 @@ from scripts.extractors import (
 )
 from scripts.utils import remove_ads, scroll_to_top
 from scripts.utils.merger import merge_player_data
+from scripts.utils.proxy import ProxyManager  # [NEW]
 
 # Garantir que diretório de logs existe
 LOG_DIR = Path(__file__).parent.parent / 'logs'
@@ -83,6 +84,7 @@ class OgolScraper:
         self.headless = headless
         self.detailed = detailed
         self.data: Dict[str, Any] = {}
+        self.proxy_manager = ProxyManager()  # [NEW] Initialize ProxyManager
     
     from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
 
@@ -193,10 +195,15 @@ class OgolScraper:
         """
         logger.info(f"Iniciando scraping: {url}")
         
+        # [NEW] Get proxy
+        proxy_config = self.proxy_manager.get_proxy()
+        
         with sync_playwright() as p:
+            # [NEW] Pass proxy to launch
             browser = p.chromium.launch(
                 headless=self.headless,
-                args=BROWSER_ARGS
+                args=BROWSER_ARGS,
+                proxy=proxy_config  # Inject proxy if available
             )
             # Contexto com anti-detecção e headers extras
             context = browser.new_context(

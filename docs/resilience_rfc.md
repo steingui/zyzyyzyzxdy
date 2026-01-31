@@ -50,9 +50,9 @@ Esta fase foca em garantir que o sistema sobreviva a restarts e bloqueios.
     - **Solução**: Substituir por Redis (ou SQLite simples para fila) para manter jobs persistentes entre restarts da API.
     - **Benefício**: Zero perda de jobs agendados.
 
-2.  [ ] **Rotação de Proxies (Smart Proxy)** (Prioridade 2):
+2.  [x] **Rotação de Proxies (Smart Proxy)** (✅ IMPLEMENTADO v3.5.0):
     - **Problema**: Scraping massivo em um único IP leva a bloqueios (429/403).
-    - **Solução**: Integrar serviço de proxy rotativo ou pool de proxies gratuitos (menos confiável) / pagos (BrightData/ScraperAPI).
+    - **Solução**: `ProxyManager` integrado ao `OgolScraper` com suporte a `PROXY_LIST` via variáveis de ambiente.
     - **Benefício**: Escalabilidade e evasão de bloqueios.
 
 3.  [ ] **Monitoramento e Alertas (Health Checks)** (Prioridade 3):
