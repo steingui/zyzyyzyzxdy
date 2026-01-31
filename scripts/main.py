@@ -18,15 +18,17 @@ import sys
 import os
 import logging
 import time
+from datetime import datetime
 from typing import List, Dict, Optional, Set
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright, Page, TimeoutError as PlaywrightTimeout
 
 # Importar módulos locais
-sys.path.insert(0, str(Path(__file__).parent))
-from scraper import OgolScraper
-from db_importer import process_input, get_connection
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from scripts.scraper import OgolScraper
+from scripts.db_importer import process_input, get_connection
+from scripts.config import USER_AGENT, VIEWPORT
 
 # Configuração de logging com timestamp ISO
 LOG_TIMESTAMP = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
