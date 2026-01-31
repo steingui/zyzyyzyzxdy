@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""
+run_batch.py - Executa o scraper para toda a rodada (Paralelo + Incremental)
+
+1. Descobre URLs dos jogos (via crawl_round.py)
+2. Carrega progresso anterior (se houver)
+3. Executa scraper.py para cada jogo pendente em PARALELO
+4. Consolida resultados e salva incrementalmente
+"""
+
+import json
+import logging
+import subprocess
+import sys
+import time
+from pathlib import Path
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Configuração
+SCRIPTS_DIR = Path(__file__).parent
+OUTPUT_FILE = Path("rodada_atual_full.json")
+LOG_DIR = Path("logs")
+LOG_DIR.mkdir(exist_ok=True)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(LOG_DIR / "batch_run.log")
+    ]
+)
+logger = logging.getLogger(__name__)
+
+def get_matches():
+    """Chama o crawler para descobrir jogos."""
+    logger.info("Descobrindo jogos da rodada...")
+    try:
+        result = subprocess.run(
+            [sys.executable, str(SCRIPTS_DIR / "crawl_round.py")],
+            capture_output=True, text=True, check=True
+        )
+        # O crawler imprime logs no stderr e JSON no stdout
+        urls = json.loads(result.stdout)
+        return urls
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Falha ao buscar jogos: {e.stderr}")
+        return []
+    except json.JSONDecodeError:
+        logger.error(f"Saída inválida do crawler: {result.stdout}")
+        return []
+
+def scrape_match(url, index, total):
+    """Executa o scraper para um único jogo."""
+    logger.info(f"[{index}/{total}] Iniciando scraping: {url}")
+    
+    try:
+        # Import local para evitar problemas de escopo/path se importado no topo
+        from scripts.scraper import OgolScraper
+        
+        # Cria nova instância para cada thread (Playwright sync API suporte isso)
+        scraper = OgolScraper(headless=True, detailed=True)
+        data = scraper.scrape(url)
+        return data
+
+    except Exception as e:
+        logger.error(f"Erro ao processar {url}: {e}")
+        return None
+
+def main():
+    start_time = datetime.now()
+    
+    # 1. Obter lista de jogos
+    urls = get_matches()
+    if not urls:
+        logger.error("Nenhum jogo encontrado para processar.")
+        sys.exit(1)
+        
+    # 2. Carregar progresso anterior se existir
+    results = {
+        "metadata": {
+            "crawled_at": start_time.isoformat(),
+            "source": "ogol.com.br",
+            "total_games": len(urls)
+        },
+        "games": []
+    }
+    
+    if OUTPUT_FILE.exists():
+        try:
+            with open(OUTPUT_FILE, 'r', encoding='utf-8') as f:
+                saved_data = json.load(f)
+                if "games" in saved_data:
+                    results = saved_data
+                    processed_urls = {g.get('url') for g in results["games"] if g.get('url')}
+                    logger.info(f"Encontrados {len(processed_urls)} jogos já processados. Retomando...")
+                    
+                    # Filtra URLs
+                    urls = [u for u in urls if u not in processed_urls]
+        except Exception as e:
+            logger.warning(f"Não foi possível ler arquivo existente, iniciando do zero: {e}")
+
+    if not urls:
+        logger.info("Todos os jogos já foram processados!")
+        sys.exit(0)
+
+    # Adicionar path raiz ao pythonpath para imports funcionarem dentro das threads
+    sys.path.append(str(Path.cwd()))
+    
+    success_count = len(results["games"])
+    total_urls = success_count + len(urls)
+    
+    logger.info(f"Iniciando processamento PARALELO de {len(urls)} jogos restantes (max_workers=3)...")
+
+    # 3. Processar em Paralelo
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        # Submit tasks
+        future_to_url = {
+            executor.submit(scrape_match, url, i, total_urls): url
+            for i, url in enumerate(urls, success_count + 1)
+        }
+        
+        for future in as_completed(future_to_url):
+            url = future_to_url[future]
+            try:
+                data = future.result()
+                if data:
+                    results["games"].append(data)
+                    success_count += 1
+                    logger.info(f"Sucesso: {url}")
+                    
+                    # Salvamento Incremental (Thread-safe aqui na main thread)
+                    try:
+                        logger.info(f"Salvando progresso ({success_count}/{total_urls})...")
+                        with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
+                            json.dump(results, f, ensure_ascii=False, indent=2)
+                    except Exception as e:
+                        logger.error(f"Erro ao salvar arquivo incrementalmente: {e}")
+                else:
+                    logger.error(f"Falha ao processar: {url}")
+            except Exception as e:
+                logger.error(f"Exceção não tratada na thread para {url}: {e}")
+
+    duration = datetime.now() - start_time
+    logger.info(f"Processamento concluído em {duration}.")
+    logger.info(f"Sucesso: {success_count}/{total_urls}")
+    logger.info(f"Dados salvos em: {OUTPUT_FILE.absolute()}")
+
+if __name__ == "__main__":
+    main()
