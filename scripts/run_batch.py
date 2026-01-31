@@ -108,8 +108,8 @@ def main():
     # 1. Obter lista de jogos
     urls = get_matches()
     if not urls:
-        logger.error("Nenhum jogo encontrado para processar.")
-        sys.exit(1)
+        logger.info("Pipeline encerrado: Nenhum jogo disponível para processar na próxima rodada.")
+        sys.exit(0)
         
     # 2. Carregar progresso anterior se existir
     results = {
