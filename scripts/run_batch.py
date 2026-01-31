@@ -159,7 +159,7 @@ def main():
     logger.info(f"Iniciando processamento SEQUENCIAL de {len(urls)} jogos restantes...")
 
     # 3. Processar (workers=1 efetivamente sequencial)
-    with ThreadPoolExecutor(max_workers=1) as executor:
+    with ThreadPoolExecutor(max_workers=2) as executor:
         # Submit tasks
         future_to_url = {
             executor.submit(scrape_match, url, i, total_urls): url

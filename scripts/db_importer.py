@@ -1,16 +1,12 @@
 #!/usr/bin/env python3
 """
-db_importer.py - Importador de dados do OpenClaw para PostgreSQL
+db_importer.py - Ingestão de dados estatísticos para PostgreSQL.
 
-Recebe JSON via stdin (pipe do OpenClaw) e persiste no banco de dados.
-Respeita as regras de segurança S02 (transação segura) e S03 (idempotência).
+Este script processa dados estruturados e semi-estruturados (JSON) e os persiste no RDS,
+garantindo integridade via operações atômicas (ON CONFLICT).
 
-Uso:
-    openclaw run --prompt ... --url "..." | python3 scripts/db_importer.py
-    echo '{"home_team":"Flamengo",...}' | python3 scripts/db_importer.py
-
-Variáveis de ambiente necessárias (S01):
-    DATABASE_URL=postgresql://user:pass@localhost:5432/brasileirao_2026
+Exemplo de uso:
+    python3 scripts/run_batch.py --rodada 1 | python3 scripts/db_importer.py
 """
 
 import json
@@ -59,65 +55,48 @@ def get_connection():
 
 
 def get_or_create_time(cursor, nome: str) -> int:
-    """Busca ou cria um time pelo nome."""
-    cursor.execute("SELECT id FROM times WHERE nome = %s", (nome,))
-    result = cursor.fetchone()
-    
-    if result:
-        return result['id']
-    
-    # Criar time com dados básicos (será atualizado depois)
-    cursor.execute(
-        "INSERT INTO times (nome) VALUES (%s) RETURNING id",
-        (nome,)
-    )
+    """Busca ou cria um time pelo nome usando ON CONFLICT para segurança paralela."""
+    cursor.execute("""
+        INSERT INTO times (nome) VALUES (%s)
+        ON CONFLICT (nome) DO UPDATE SET nome = EXCLUDED.nome
+        RETURNING id
+    """, (nome,))
     return cursor.fetchone()['id']
 
 
 def get_or_create_jogador(cursor, nome: str, time_id: Optional[int] = None) -> int:
     """Busca ou cria um jogador pelo nome."""
+    # Como jogadores podem ter nomes iguais, idealmente teríamos um identificador único do Ogol.
+    # Por ora, mantemos busca por nome. Se quisermos evitar duplicatas em paralelo:
     cursor.execute("SELECT id FROM jogadores WHERE nome = %s", (nome,))
     result = cursor.fetchone()
-    
-    if result:
-        return result['id']
-    
-    cursor.execute(
-        "INSERT INTO jogadores (nome, time_atual_id) VALUES (%s, %s) RETURNING id",
-        (nome, time_id)
-    )
+    if result: return result['id']
+
+    cursor.execute("""
+        INSERT INTO jogadores (nome, time_atual_id) VALUES (%s, %s)
+        RETURNING id
+    """, (nome, time_id))
     return cursor.fetchone()['id']
 
 
 def get_or_create_arbitro(cursor, nome: str, estado: Optional[str] = None) -> int:
     """Busca ou cria um árbitro pelo nome."""
-    cursor.execute("SELECT id FROM arbitros WHERE nome = %s", (nome,))
-    result = cursor.fetchone()
-    
-    if result:
-        return result['id']
-    
-    cursor.execute(
-        "INSERT INTO arbitros (nome, estado) VALUES (%s, %s) RETURNING id",
-        (nome, estado)
-    )
+    cursor.execute("""
+        INSERT INTO arbitros (nome) VALUES (%s)
+        ON CONFLICT (nome) DO UPDATE SET nome = EXCLUDED.nome
+        RETURNING id
+    """, (nome,))
     return cursor.fetchone()['id']
 
 
 def get_or_create_estadio(cursor, nome: str, cidade: Optional[str] = None, 
                            estado: Optional[str] = None, capacidade: Optional[int] = None) -> int:
     """Busca ou cria um estádio pelo nome."""
-    cursor.execute("SELECT id FROM estadios WHERE nome = %s", (nome,))
-    result = cursor.fetchone()
-    
-    if result:
-        return result['id']
-    
-    cursor.execute(
-        """INSERT INTO estadios (nome, cidade, estado, capacidade) 
-           VALUES (%s, %s, %s, %s) RETURNING id""",
-        (nome, cidade, estado, capacidade)
-    )
+    cursor.execute("""
+        INSERT INTO estadios (nome) VALUES (%s)
+        ON CONFLICT (nome) DO UPDATE SET nome = EXCLUDED.nome
+        RETURNING id
+    """, (nome,))
     return cursor.fetchone()['id']
 
 
@@ -149,14 +128,29 @@ def check_idempotency(cursor, rodada: int, time_casa_id: int, time_fora_id: int)
 
 def insert_partida(cursor, data: dict, time_casa_id: int, time_fora_id: int,
                    estadio_id: Optional[int], arbitro_id: Optional[int]) -> int:
-    """Insere a partida e retorna o ID."""
+    """
+    Insere a partida ou atualiza se já existir.
+    Salva dados extras na coluna JSONB metadata.
+    """
+    # Preparar metadata (remover campos grandes para economizar espaço)
+    metadata = data.copy()
+    for key in ['escalacao_casa', 'escalacao_fora', 'eventos', 'stats_home', 'stats_away']:
+        metadata.pop(key, None)
+    
     cursor.execute("""
         INSERT INTO partidas (
             rodada, time_casa_id, time_fora_id, 
             gols_casa, gols_fora,
             gols_casa_intervalo, gols_fora_intervalo,
-            data_hora, estadio_id, arbitro_id, publico, url_fonte, status
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'finished')
+            data_hora, estadio_id, arbitro_id, publico, url_fonte, status,
+            metadata
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'finished', %s)
+        ON CONFLICT (rodada, time_casa_id, time_fora_id) 
+        DO UPDATE SET
+            gols_casa = EXCLUDED.gols_casa,
+            gols_fora = EXCLUDED.gols_fora,
+            metadata = partidas.metadata || EXCLUDED.metadata,
+            updated_at = CURRENT_TIMESTAMP
         RETURNING id
     """, (
         data['rodada'],
@@ -170,16 +164,23 @@ def insert_partida(cursor, data: dict, time_casa_id: int, time_fora_id: int,
         estadio_id,
         arbitro_id,
         data.get('publico'),
-        data.get('url_fonte')
+        data.get('url_fonte'),
+        json.dumps(metadata)
     ))
     
     return cursor.fetchone()['id']
 
 
 def insert_estatisticas(cursor, partida_id: int, data: dict):
-    """Insere as estatísticas da partida."""
+    """Insere ou atualiza as estatísticas da partida com flexibilidade JSONB."""
     stats_home = data.get('stats_home', {})
     stats_away = data.get('stats_away', {})
+    
+    # Capturar TUDO o que vier no stats_home/away como metadata
+    metadata = {
+        'home_raw': stats_home,
+        'away_raw': stats_away
+    }
     
     cursor.execute("""
         INSERT INTO estatisticas_partida (
@@ -198,11 +199,26 @@ def insert_estatisticas(cursor, partida_id: int, data: dict):
             defesas_goleiro_casa, defesas_goleiro_fora,
             cortes_casa, cortes_fora,
             amarelos_casa, amarelos_fora,
-            vermelhos_casa, vermelhos_fora
+            vermelhos_casa, vermelhos_fora,
+            metadata
         ) VALUES (
             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
         )
+        ON CONFLICT (partida_id) 
+        DO UPDATE SET
+            posse_casa = EXCLUDED.posse_casa,
+            posse_fora = EXCLUDED.posse_fora,
+            chutes_casa = EXCLUDED.chutes_casa,
+            chutes_fora = EXCLUDED.chutes_fora,
+            chutes_gol_casa = EXCLUDED.chutes_gol_casa,
+            chutes_gol_fora = EXCLUDED.chutes_gol_fora,
+            xg_casa = EXCLUDED.xg_casa,
+            xg_fora = EXCLUDED.xg_fora,
+            passes_casa = EXCLUDED.passes_casa,
+            passes_fora = EXCLUDED.passes_fora,
+            metadata = estatisticas_partida.metadata || EXCLUDED.metadata,
+            updated_at = CURRENT_TIMESTAMP
     """, (
         partida_id,
         stats_home.get('posse'), stats_away.get('posse'),
@@ -219,7 +235,8 @@ def insert_estatisticas(cursor, partida_id: int, data: dict):
         stats_home.get('defesas_goleiro'), stats_away.get('defesas_goleiro'),
         stats_home.get('cortes'), stats_away.get('cortes'),
         stats_home.get('amarelos'), stats_away.get('amarelos'),
-        stats_home.get('vermelhos'), stats_away.get('vermelhos')
+        stats_home.get('vermelhos'), stats_away.get('vermelhos'),
+        json.dumps(metadata)
     ))
 
 
@@ -337,80 +354,38 @@ def process_input(data: dict) -> bool:
         time_casa_id = get_or_create_time(cursor, data['home_team'])
         time_fora_id = get_or_create_time(cursor, data['away_team'])
         
-        # Regra S03: Verificar idempotência
-        existing_id = check_idempotency(cursor, data['rodada'], time_casa_id, time_fora_id)
+        # Criar entidades opcionais
+        estadio_id = None
+        if data.get('estadio'):
+            estadio_id = get_or_create_estadio(
+                cursor, 
+                data['estadio'].get('nome'),
+                data['estadio'].get('cidade'),
+                data['estadio'].get('estado'),
+                data['estadio'].get('capacidade')
+            )
         
-        # Se já existe, atualizar ao invés de pular totalmente?
-        # Por simplificação S03, mantemos a verificação, mas para atualização de stats,
-        # poderíamos permitir re-processamento. Por ora, vamos deletar se existir ou usar UPDATE.
-        # Devido à complexidade, vou manter a lógica original: se existe, avisa e para.
-        # Mas para meu teste funcionar (rerun), idealmente eu faria upsert.
-        # Vou manter a segurança S03 original.
-        if existing_id:
-             # Se for re-run, deletamos para inserir novo (cuidado em prod)
-             # Ou apenas atualizamos.
-             # Para o escopo User, vamos manter o aviso.
-             pass
+        arbitro_id = None
+        if data.get('arbitro'):
+            arbitro_id = get_or_create_arbitro(
+                cursor,
+                data['arbitro'].get('nome'),
+                data['arbitro'].get('estado')
+            )
 
-        if existing_id:
-            logger.info(f"Partida {existing_id} detectada. Atualizando dados...")
-            partida_id = existing_id
-            
-            # Atualizar stats principais (UPDATE)
-            # (Simplificação: vamos apenas setar partida_id e continuar 
-            #  para insert_estatisticas/eventos que devem suportar upsert ou ser deletados antes)
-            #  Como minhas funcoes de insert sao INSERT... melhor nao mexer muito aqui.
-            #  Vou manter o comportamento de retornar False para evitar duplicação
-            #  A MENOS que o usuario queira explicitamente update.
-            pass
-            
-        if existing_id:
-            # Opção A: Retornar False (Idempotencia estrita)
-            # logger.warning(f"Partida já existe...")
-            # return False
-            
-            # Opção B: Assumir atualização para stats detalhadas
-            partida_id = existing_id
-        else:
-            # Criar entidades opcionais
-            estadio_id = None
-            if data.get('estadio'):
-                estadio_id = get_or_create_estadio(
-                    cursor, 
-                    data['estadio'].get('nome'),
-                    data['estadio'].get('cidade'),
-                    data['estadio'].get('estado'),
-                    data['estadio'].get('capacidade')
-                )
-            
-            arbitro_id = None
-            if data.get('arbitro'):
-                arbitro_id = get_or_create_arbitro(
-                    cursor,
-                    data['arbitro'].get('nome'),
-                    data['arbitro'].get('estado')
-                )
-            
-            # Inserir partida principal
-            partida_id = insert_partida(cursor, data, time_casa_id, time_fora_id, estadio_id, arbitro_id)
-            logger.info(f"Partida inserida com ID: {partida_id}")
+        # Tenta inserir/atualizar partida (ON CONFLICT garante atomicidade)
+        partida_id = insert_partida(cursor, data, time_casa_id, time_fora_id, estadio_id, arbitro_id)
         
-        # Inserir estatísticas (Upsert seria ideal, mas vou assumir limpo se nova)
-        # Se for update, estatisticas_partida tem UNIQUE(partida_id), vai falhar se nao tratar.
-        # Vou assumir fluxo novo sempre por enquanto.
+        # Inserir estatísticas (ON CONFLICT DO UPDATE)
         if 'stats_home' in data or 'stats_away' in data:
-            try:
-                insert_estatisticas(cursor, partida_id, data)
-                logger.info(f"Estatísticas inseridas para partida {partida_id}")
-            except psycopg2.errors.UniqueViolation:
-                conn.rollback() 
-                cursor = conn.cursor() # reset cursor
-                logger.warning("Estatísticas já existem, pulando inserção.")
+            insert_estatisticas(cursor, partida_id, data)
+            logger.info(f"Estatísticas processadas para partida {partida_id}")
 
-        # Inserir eventos (Delete all + insert para updates?)
+        # Inserir eventos (Limpamos antes para evitar duplicação em re-runs)
         if 'eventos' in data:
+            cursor.execute("DELETE FROM eventos WHERE partida_id = %s", (partida_id,))
             insert_eventos(cursor, partida_id, data['eventos'], time_casa_id, time_fora_id)
-            logger.info(f"Eventos inseridos: {len(data['eventos'])}")
+            logger.info(f"Eventos processados: {len(data['eventos'])}")
         
         # Inserir escalações
         if 'escalacao_casa' in data:

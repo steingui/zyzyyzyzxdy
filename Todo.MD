@@ -1,26 +1,41 @@
-**🔥 Prioridade Alta (Imediato)**
-- [ ] Integrar `db_importer.py` ao fluxo do `run_batch.py` {cm:2026-01-31}
-- [ ] Testar pipeline completo: Scraper → JSON → PostgreSQL {cm:2026-01-31}
-- [ ] Validar integridade dos dados no banco (Schema vs Dados Reais) {cm:2026-01-31}
-- [ ] Refinar limpeza de dados (ex: remover prefixo "ÁRBITRO" de `arbitro.nome`) {cm:2026-01-31}
+# Roadmap do Projeto
 
-**🔄 Prioridade Média (Refinamento)**
-- [ ] Otimizar lazy loading (scroll ainda mais robusto para escalações) {cm:2026-01-31}
-- [ ] Criar script CLI unificado (`manage.py` ou `main.py`) {cm:2026-01-31}
-- [ ] Dashboard simples para visualizar dados ingeridos (SQL ou Streamlit) {cm:2026-01-31}
+## 🚀 Roadmap v2.0 (Próximos Passos)
 
-**✅ Concluído (v1.3)**
-- [x] Descoberta automática de jogos (`crawl_round.py`) {cm:2026-01-31}
-- [x] Coletar todos os links de jogos de uma rodada {cm:2026-01-31}
-- [x] Execução paralela e robusta (`run_batch.py`) {cm:2026-01-31}
-- [x] Sistema de Retry com backoff exponencial {cm:2026-01-31}
-- [x] Extração modular (Lineups, Events, Stats) {cm:2026-01-31}
-- [x] Log estruturado e tratamento de erros {cm:2026-01-31}
-- [x] Opção de debug visual (`--no-headless`) {cm:2026-01-31}
+**DevOps & Infraestrutura**
+- [ ] **Hosted DB Migration**: Configurar `.env` para apontar para banco remoto (Neon/Supabase/RDS).
+- [ ] **SSL Support**: Garantir que a conexão PostgreSQL aceite `sslmode=require`.
+- [ ] **Dockerização**: Facilitar execução local limpa vinculada ao banco remoto.
 
-**📈 Futuro**
-- [ ] Dashboard de visualização
-- [ ] Frontend para explorar dados
-- [ ] Gráficos de xG por time/rodada
-- [ ] API REST para expor dados
-- [ ] Análises avançadas (xG acumulado, comparativos)
+**Dados & Analytics**
+- [ ] **Backfill Histórico**: Script para raspar temporadas passadas (2020-2025).
+- [ ] **Dashboard de Visualização**: Criar app (Streamlit/Metabase) para explorar:
+    - Ranking de xG vs Gols.
+    - Mapa de calor de chutes.
+    - Performance de árbitros (Cartões/Faltas).
+- [ ] **API Rest**: Expor os dados do PostgreSQL via FastAPI para consumo externo.
+
+**Refinamento Técnico**
+- [ ] **Testes Automatizados**: Aumentar cobertura de testes unitários (`tests/`).
+- [ ] **Proxy Rotation**: Integrar rotação de proxies para escalar volume de raspagem.
+
+---
+
+## ✅ Histórico de Versões
+
+### v1.6 (Automação Autônoma) - 2026-01-31
+- [x] **Autonomia**: `crawl_round.py` detecta e busca apenas a próxima rodada disponível.
+- [x] **Estado de Banco**: `state.py` gerencia o cursor de execução (Last Round + 1).
+- [x] **Override Manual**: Possibilidade de rodar `run_pipeline.sh <rodada>` para correções.
+- [x] **Graceful Exit**: Pipeline encerra sem erro se a rodada futura não tiver jogos.
+
+### v1.5 (Pipeline E2E & Robustez) - 2026-01-31
+- [x] **Orquestração**: Script `run_pipeline.sh` unificado.
+- [x] **Dados**: Normalização rigorosa (Datas, Números) e limpeza de strings.
+- [x] **Anti-Block**: Execução Headless com headers furtivos e taxa de requisição humana.
+- [x] **Lazy Loading**: "Smart Scroll" implementado para carregar escalações e stats ocultos.
+
+### v1.0 - v1.4 (Fundação)
+- [x] **Scraper Core**: Playwright engine para Ogol.com.br.
+- [x] **Banco de Dados**: Schema PostgreSQL relacional (Partidas, Times, Jogadores, Eventos, Stats).
+- [x] **Batch Processing**: Execução paralela/sequencial configurável.

@@ -40,7 +40,7 @@ CREATE TABLE jogadores (
 -- Árbitros da CBF
 CREATE TABLE arbitros (
     id SERIAL PRIMARY KEY,
-    nome VARCHAR(150) NOT NULL,
+    nome VARCHAR(150) NOT NULL UNIQUE,
     estado CHAR(2),
     categoria VARCHAR(50), -- FIFA, CBF Nacional, etc.
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -49,7 +49,7 @@ CREATE TABLE arbitros (
 -- Estádios
 CREATE TABLE estadios (
     id SERIAL PRIMARY KEY,
-    nome VARCHAR(150) NOT NULL,
+    nome VARCHAR(150) NOT NULL UNIQUE,
     cidade VARCHAR(100),
     estado CHAR(2),
     capacidade INTEGER,
