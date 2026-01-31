@@ -126,7 +126,7 @@ match = Partida.query.options(
 
 ---
 
-### 5. **Idempotent Scraping Jobs**
+### 5. **Idempotent Scraping Jobs** (✅ IMPLEMENTADO v3.1.0)
 
 **Problema:** `is_duplicate` verifica PIDs que podem ser reciclados
 
@@ -156,7 +156,7 @@ else:
 
 ## 🔧 Otimizações de Performance (Média Prioridade)
 
-### 6. **Connection Pool Tuning**
+### 6. **Connection Pool Tuning** (✅ IMPLEMENTADO v3.1.0)
 
 **Proposta:**
 ```python
