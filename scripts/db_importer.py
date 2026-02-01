@@ -171,7 +171,8 @@ def check_idempotency(cursor, rodada: int, time_casa_id: int, time_fora_id: int)
 
 
 def insert_partida(cursor, data: dict, time_casa_id: int, time_fora_id: int,
-                   estadio_id: Optional[int], arbitro_id: Optional[int], season_id: int) -> int:
+                   estadio_id: Optional[int], arbitro_id: Optional[int], season_id: int, 
+                   liga_id: int, ano: int) -> int:
     """
     Insere a partida ou atualiza se já existir.
     Salva dados extras na coluna JSONB metadata.
@@ -187,8 +188,8 @@ def insert_partida(cursor, data: dict, time_casa_id: int, time_fora_id: int,
             gols_casa, gols_fora,
             gols_casa_intervalo, gols_fora_intervalo,
             data_hora, estadio_id, arbitro_id, publico, url_fonte, status,
-            metadata
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'finished', %s)
+            metadata, liga_id, ano
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'finished', %s, %s, %s)
         ON CONFLICT (temporada_id, rodada, time_casa_id, time_fora_id) 
         DO UPDATE SET
             gols_casa = EXCLUDED.gols_casa,
@@ -210,7 +211,9 @@ def insert_partida(cursor, data: dict, time_casa_id: int, time_fora_id: int,
         arbitro_id,
         data.get('publico'),
         data.get('url_fonte'),
-        json.dumps(metadata)
+        json.dumps(metadata),
+        liga_id,
+        ano
     ))
     
     return cursor.fetchone()['id']
@@ -399,6 +402,13 @@ def process_input(data: dict, league_slug: str = "brasileirao", year: int = 2026
     cursor = conn.cursor()
     
     try:
+        # Get league ID explicitly for strict context
+        cursor.execute("SELECT id FROM ligas WHERE ogol_slug = %s", (league_slug,))
+        league_row = cursor.fetchone()
+        if not league_row:
+             raise ValueError(f"League {league_slug} not found")
+        liga_id = league_row['id']
+
         # Get or create season
         season_id = get_or_create_season(cursor, league_slug, year)
         logger.info(f"Using season_id={season_id} for {league_slug} {year}")
@@ -432,7 +442,8 @@ def process_input(data: dict, league_slug: str = "brasileirao", year: int = 2026
             )
 
         # Tenta inserir/atualizar partida (ON CONFLICT garante atomicidade)
-        partida_id = insert_partida(cursor, data, time_casa_id, time_fora_id, estadio_id, arbitro_id, season_id)
+        # Passes strict context (liga_id, year)
+        partida_id = insert_partida(cursor, data, time_casa_id, time_fora_id, estadio_id, arbitro_id, season_id, liga_id, year)
         
         # Inserir estatísticas (ON CONFLICT DO UPDATE)
         if 'stats_home' in data or 'stats_away' in data:

@@ -417,3 +417,22 @@ def get_queue_status():
         "worker_running": worker_running,
         "worker_alive": worker_thread.is_alive() if worker_thread else False
     })
+
+
+@scrape_bp.route('/flush', methods=['DELETE'])
+def flush_queue():
+    """Flush the scraping queue and job history (Admin utility)"""
+    try:
+        # Clear main queue and jobs hash
+        redis_client.delete(KEY_QUEUE)
+        redis_client.delete(KEY_JOBS)
+        
+        return jsonify({
+            "message": "Redis queue and job history flushed successfully.",
+            "keys_deleted": [KEY_QUEUE, KEY_JOBS]
+        }), 200
+    except Exception as e:
+        return jsonify({
+            "error": "Failed to flush Redis",
+            "details": str(e)
+        }), 500

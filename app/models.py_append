@@ -1,0 +1,27 @@
+
+    jogador_secundario_id = db.Column(db.Integer, db.ForeignKey('jogadores.id'))
+    
+    partida = db.relationship('Partida', backref='eventos')
+    time = db.relationship('Time', backref='eventos')
+    jogador = db.relationship('Jogador', foreign_keys=[jogador_id], backref='eventos')
+    jogador_secundario = db.relationship('Jogador', foreign_keys=[jogador_secundario_id], backref='eventos_secundarios')
+    
+    # Indexes
+    __table_args__ = (
+        Index('idx_eventos_timeline', 'partida_id', 'periodo', 'minuto'),
+    )
+
+class Escalacao(db.Model):
+    __tablename__ = 'escalacoes'
+    partida_id = db.Column(db.Integer, db.ForeignKey('partidas.id'), primary_key=True)
+    jogador_id = db.Column(db.Integer, db.ForeignKey('jogadores.id'), primary_key=True)
+    time_id = db.Column(db.Integer, db.ForeignKey('times.id'), nullable=False)
+    titular = db.Column(db.Boolean, default=False)
+    numero_camisa = db.Column(db.String(10))
+    nota = db.Column(db.Float)
+    stats = db.Column(JSONB, default={})
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    partida = db.relationship('Partida', backref='escalacoes')
+    jogador = db.relationship('Jogador', backref='escalacoes')
+    time = db.relationship('Time', backref='escalacoes')

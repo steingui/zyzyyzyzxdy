@@ -126,6 +126,8 @@ class Partida(db.Model):
     time_fora_id = db.Column(db.Integer, db.ForeignKey('times.id'), nullable=False)
     gols_casa = db.Column(db.Integer, default=0)
     gols_fora = db.Column(db.Integer, default=0)
+    gols_casa_intervalo = db.Column(db.Integer)
+    gols_fora_intervalo = db.Column(db.Integer)
     data_hora = db.Column(db.DateTime)
     estadio_id = db.Column(db.Integer, db.ForeignKey('estadios.id'))
     arbitro_id = db.Column(db.Integer, db.ForeignKey('arbitros.id'))
@@ -134,9 +136,16 @@ class Partida(db.Model):
     url_fonte = db.Column(db.String(255), unique=True)
     meta_data = db.Column("metadata", JSONB, default={})
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    start_time = db.Column(db.DateTime)
+    # Denormalized context for strict querying
+    liga_id = db.Column(db.Integer, db.ForeignKey('ligas.id'))
+    ano = db.Column(db.Integer)
 
     # Relationships
     temporada = db.relationship('Temporada', back_populates='partidas')
+    liga = db.relationship('Liga', backref='partidas')
     time_casa = db.relationship('Time', foreign_keys=[time_casa_id], backref='jogos_casa')
     time_fora = db.relationship('Time', foreign_keys=[time_fora_id], backref='jogos_fora')
     estadio = db.relationship('Estadio', backref='partidas')
@@ -161,6 +170,12 @@ class EstatisticaPartida(db.Model):
     posse_fora = db.Column(db.Integer)
     chutes_casa = db.Column(db.Integer)
     chutes_fora = db.Column(db.Integer)
+    chutes_gol_casa = db.Column(db.Integer)
+    chutes_gol_fora = db.Column(db.Integer)
+    chutes_bloqueados_casa = db.Column(db.Integer)
+    chutes_bloqueados_fora = db.Column(db.Integer)
+    escanteios_casa = db.Column(db.Integer)
+    escanteios_fora = db.Column(db.Integer)
     xg_casa = db.Column(db.Float)
     xg_fora = db.Column(db.Float)
     xgot_casa = db.Column(db.Float)
@@ -205,18 +220,34 @@ class Evento(db.Model):
     partida_id = db.Column(db.Integer, db.ForeignKey('partidas.id'), nullable=False)
     tipo = db.Column(db.String(50), nullable=False)
     minuto = db.Column(db.Integer)
+    minuto_adicional = db.Column(db.Integer, default=0)
     periodo = db.Column(db.Integer)
     time_id = db.Column(db.Integer, db.ForeignKey('times.id'))
     jogador_id = db.Column(db.Integer, db.ForeignKey('jogadores.id'))
+    jogador_secundario_id = db.Column(db.Integer, db.ForeignKey('jogadores.id'))
     descricao = db.Column(db.Text)
 
     partida = db.relationship('Partida', backref='eventos')
     time = db.relationship('Time', backref='eventos')
-    jogador = db.relationship('Jogador', backref='eventos')
+    jogador = db.relationship('Jogador', foreign_keys=[jogador_id], backref='eventos')
+    jogador_secundario = db.relationship('Jogador', foreign_keys=[jogador_secundario_id], backref='eventos_secundarios')
     
     # Indexes
     __table_args__ = (
         Index('idx_eventos_timeline', 'partida_id', 'periodo', 'minuto'),
     )
 
-# ... (Other models like Escalar, Tecnico if they existed, but simpler to stop here if files end)
+class Escalacao(db.Model):
+    __tablename__ = 'escalacoes'
+    partida_id = db.Column(db.Integer, db.ForeignKey('partidas.id'), primary_key=True)
+    jogador_id = db.Column(db.Integer, db.ForeignKey('jogadores.id'), primary_key=True)
+    time_id = db.Column(db.Integer, db.ForeignKey('times.id'), nullable=False)
+    titular = db.Column(db.Boolean, default=False)
+    numero_camisa = db.Column(db.String(10))
+    nota = db.Column(db.Float)
+    stats = db.Column(JSONB, default={})
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    partida = db.relationship('Partida', backref='escalacoes')
+    jogador = db.relationship('Jogador', backref='escalacoes')
+    time = db.relationship('Time', backref='escalacoes')
