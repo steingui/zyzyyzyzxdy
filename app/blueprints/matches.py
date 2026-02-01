@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify, request, current_app
-from app.models import Partida, Evento, Season
+from app.models import Partida, Evento, Temporada
 from app.schemas import PartidaSchema
 from app import cache
 from sqlalchemy.orm import joinedload, selectinload
@@ -39,7 +39,7 @@ async def get_matches():
                 joinedload(Partida.estatisticas),
                 selectinload(Partida.eventos).joinedload(Evento.time),
                 selectinload(Partida.eventos).joinedload(Evento.jogador),
-                joinedload(Partida.season)
+                joinedload(Partida.temporada)
             )
             
             if rodada:
@@ -83,7 +83,7 @@ async def get_match(match_id):
                 joinedload(Partida.estatisticas),
                 selectinload(Partida.eventos).joinedload(Evento.time),
                 selectinload(Partida.eventos).joinedload(Evento.jogador),
-                joinedload(Partida.season)
+                joinedload(Partida.temporada)
             ).filter_by(id=match_id)
             
             result = await session.execute(stmt)

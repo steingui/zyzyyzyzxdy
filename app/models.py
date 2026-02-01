@@ -1,68 +1,80 @@
 from app import db
 from datetime import datetime
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import Index
 
 # ====================
-# NEW MODELS: MULTI-LEAGUE SUPPORT
+# NEW MODELS: MULTI-LEAGUE SUPPORT (STANDARDIZED PT-BR)
 # ====================
 
-class League(db.Model):
-    __tablename__ = 'leagues'
+class Liga(db.Model):
+    __tablename__ = 'ligas'
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), unique=True, nullable=False)
+    nome = db.Column(db.String(100), unique=True, nullable=False)
     slug = db.Column(db.String(50), unique=True, nullable=False)
-    country = db.Column(db.String(100), nullable=False)
-    confederation = db.Column(db.String(20))
-    num_teams = db.Column(db.Integer, default=20)
-    num_rounds = db.Column(db.Integer, default=38)
+    pais = db.Column(db.String(100), nullable=False)
+    confederacao = db.Column(db.String(20))
+    num_times = db.Column(db.Integer, default=20)
+    num_rodadas = db.Column(db.Integer, default=38)
     ogol_slug = db.Column(db.String(100))
     meta_data = db.Column("metadata", JSONB, default={})
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
-    seasons = db.relationship('Season', back_populates='league', cascade='all, delete-orphan')
-    times = db.relationship('Time', back_populates='league')
+    temporadas = db.relationship('Temporada', back_populates='liga', cascade='all, delete-orphan')
+    times = db.relationship('Time', back_populates='liga')
 
-class Season(db.Model):
-    __tablename__ = 'seasons'
+class Temporada(db.Model):
+    __tablename__ = 'temporadas'
     id = db.Column(db.Integer, primary_key=True)
-    league_id = db.Column(db.Integer, db.ForeignKey('leagues.id'), nullable=False)
-    year = db.Column(db.Integer, nullable=False)
-    start_date = db.Column(db.Date)
-    end_date = db.Column(db.Date)
+    liga_id = db.Column(db.Integer, db.ForeignKey('ligas.id'), nullable=False)
+    ano = db.Column(db.Integer, nullable=False)
+    data_inicio = db.Column(db.Date)
+    data_fim = db.Column(db.Date)
     is_current = db.Column(db.Boolean, default=False)
     ogol_edition_id = db.Column(db.String(50))
     meta_data = db.Column("metadata", JSONB, default={})
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
-    league = db.relationship('League', back_populates='seasons')
-    partidas = db.relationship('Partida', back_populates='season')
-    team_seasons = db.relationship('TeamSeason', back_populates='season', cascade='all, delete-orphan')
+    liga = db.relationship('Liga', back_populates='temporadas')
+    partidas = db.relationship('Partida', back_populates='temporada')
+    times_temporadas = db.relationship('TimeTemporada', back_populates='temporada', cascade='all, delete-orphan')
 
-class TeamSeason(db.Model):
-    __tablename__ = 'team_seasons'
+    # Indexes
+    __table_args__ = (
+        Index('idx_temporadas_current', 'liga_id', postgresql_where=(is_current == True)),
+    )
+
+class TimeTemporada(db.Model):
+    __tablename__ = 'times_temporadas'
     id = db.Column(db.Integer, primary_key=True)
-    team_id = db.Column(db.Integer, db.ForeignKey('times.id'), nullable=False)
-    season_id = db.Column(db.Integer, db.ForeignKey('seasons.id'), nullable=False)
-    active = db.Column(db.Boolean, default=True)
-    position = db.Column(db.Integer)
-    points = db.Column(db.Integer)
-    wins = db.Column(db.Integer, default=0)
-    draws = db.Column(db.Integer, default=0)
-    losses = db.Column(db.Integer, default=0)
-    goals_for = db.Column(db.Integer, default=0)
-    goals_against = db.Column(db.Integer, default=0)
+    time_id = db.Column(db.Integer, db.ForeignKey('times.id'), nullable=False)
+    temporada_id = db.Column(db.Integer, db.ForeignKey('temporadas.id'), nullable=False)
+    ativo = db.Column(db.Boolean, default=True)
+    posicao = db.Column(db.Integer)
+    pontos = db.Column(db.Integer)
+    vitorias = db.Column(db.Integer, default=0)
+    empates = db.Column(db.Integer, default=0)
+    derrotas = db.Column(db.Integer, default=0)
+    gols_pro = db.Column(db.Integer, default=0)
+    gols_contra = db.Column(db.Integer, default=0)
     meta_data = db.Column("metadata", JSONB, default={})
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
-    team = db.relationship('Time', back_populates='team_seasons')
-    season = db.relationship('Season', back_populates='team_seasons')
+    time = db.relationship('Time', back_populates='times_temporadas')
+    temporada = db.relationship('Temporada', back_populates='times_temporadas')
+
+    # Indexes/Constraints
+    __table_args__ = (
+        db.UniqueConstraint('time_id', 'temporada_id', name='time_temporada_unica'),
+        Index('idx_times_temporadas_posicao', 'temporada_id', 'posicao'),
+    )
 
 # ====================
-# UPDATED MODELS
+# CORE MODELS
 # ====================
 
 class Time(db.Model):
@@ -70,12 +82,12 @@ class Time(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     nome = db.Column(db.String(100), unique=True, nullable=False)
     escudo_url = db.Column(db.Text)
-    league_id = db.Column(db.Integer, db.ForeignKey('leagues.id'))
+    liga_id = db.Column(db.Integer, db.ForeignKey('ligas.id'))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
-    league = db.relationship('League', back_populates='times')
-    team_seasons = db.relationship('TeamSeason', back_populates='team', cascade='all, delete-orphan')
+    liga = db.relationship('Liga', back_populates='times')
+    times_temporadas = db.relationship('TimeTemporada', back_populates='time', cascade='all, delete-orphan')
 
 class Jogador(db.Model):
     __tablename__ = 'jogadores'
@@ -108,7 +120,7 @@ class Estadio(db.Model):
 class Partida(db.Model):
     __tablename__ = 'partidas'
     id = db.Column(db.Integer, primary_key=True)
-    season_id = db.Column(db.Integer, db.ForeignKey('seasons.id'), nullable=False)
+    temporada_id = db.Column(db.Integer, db.ForeignKey('temporadas.id'), nullable=False)
     rodada = db.Column(db.Integer, nullable=False)
     time_casa_id = db.Column(db.Integer, db.ForeignKey('times.id'), nullable=False)
     time_fora_id = db.Column(db.Integer, db.ForeignKey('times.id'), nullable=False)
@@ -124,14 +136,26 @@ class Partida(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     # Relationships
-    season = db.relationship('Season', back_populates='partidas')
+    temporada = db.relationship('Temporada', back_populates='partidas')
     time_casa = db.relationship('Time', foreign_keys=[time_casa_id], backref='jogos_casa')
     time_fora = db.relationship('Time', foreign_keys=[time_fora_id], backref='jogos_fora')
     estadio = db.relationship('Estadio', backref='partidas')
     arbitro = db.relationship('Arbitro', backref='partidas')
 
+    # Indexes
+    __table_args__ = (
+        # Dashboard High-Performance Index (Covering Index)
+        Index('idx_partidas_dashboard', 'temporada_id', 'status', 'data_hora', 
+              postgresql_include=['id', 'time_casa_id', 'time_fora_id', 'gols_casa', 'gols_fora']),
+        # Team History High-Performance Indexes
+        Index('idx_partidas_time_casa_history', 'time_casa_id', 'data_hora'),
+        Index('idx_partidas_time_fora_history', 'time_fora_id', 'data_hora'),
+        # Uniqueness
+        db.UniqueConstraint('temporada_id', 'rodada', 'time_casa_id', 'time_fora_id', name='partida_unica'),
+    )
+
 class EstatisticaPartida(db.Model):
-    __tablename__ = 'estatisticas_partida'
+    __tablename__ = 'estatisticas_partidas'  # Pluralized
     partida_id = db.Column(db.Integer, db.ForeignKey('partidas.id'), primary_key=True)
     posse_casa = db.Column(db.Integer)
     posse_fora = db.Column(db.Integer)
@@ -139,11 +163,41 @@ class EstatisticaPartida(db.Model):
     chutes_fora = db.Column(db.Integer)
     xg_casa = db.Column(db.Float)
     xg_fora = db.Column(db.Float)
-    # Outros campos omitidos por brevidade, mas o JSONB metadata captura tudo
+    xgot_casa = db.Column(db.Float)
+    xgot_fora = db.Column(db.Float)
+    passes_casa = db.Column(db.Integer)
+    passes_fora = db.Column(db.Integer)
+    passes_certos_casa = db.Column(db.Integer)
+    passes_certos_fora = db.Column(db.Integer)
+    passes_precisao_casa = db.Column(db.Float)
+    passes_precisao_fora = db.Column(db.Float)
+    faltas_casa = db.Column(db.Integer)
+    faltas_fora = db.Column(db.Integer)
+    impedimentos_casa = db.Column(db.Integer)
+    impedimentos_fora = db.Column(db.Integer)
+    defesas_goleiro_casa = db.Column(db.Integer)
+    defesas_goleiro_fora = db.Column(db.Integer)
+    cortes_casa = db.Column(db.Integer)
+    cortes_fora = db.Column(db.Integer)
+    interceptacoes_casa = db.Column(db.Integer)
+    interceptacoes_fora = db.Column(db.Integer)
+    amarelos_casa = db.Column(db.Integer)
+    amarelos_fora = db.Column(db.Integer)
+    vermelhos_casa = db.Column(db.Integer)
+    vermelhos_fora = db.Column(db.Integer)
+    duelos_ganhos_casa = db.Column(db.Integer)
+    duelos_ganhos_fora = db.Column(db.Integer)
+    duelos_aereos_ganhos_casa = db.Column(db.Integer)
+    duelos_aereos_ganhos_fora = db.Column(db.Integer)
     meta_data = db.Column("metadata", JSONB, default={})
     updated_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     partida = db.relationship('Partida', backref=db.backref('estatisticas', uselist=False))
+
+    # Indexes
+    __table_args__ = (
+        Index('idx_estatisticas_xg', 'xg_casa', 'xg_fora'),
+    )
 
 class Evento(db.Model):
     __tablename__ = 'eventos'
@@ -159,3 +213,10 @@ class Evento(db.Model):
     partida = db.relationship('Partida', backref='eventos')
     time = db.relationship('Time', backref='eventos')
     jogador = db.relationship('Jogador', backref='eventos')
+    
+    # Indexes
+    __table_args__ = (
+        Index('idx_eventos_timeline', 'partida_id', 'periodo', 'minuto'),
+    )
+
+# ... (Other models like Escalar, Tecnico if they existed, but simpler to stop here if files end)

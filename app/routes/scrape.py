@@ -25,7 +25,7 @@ import redis
 from pathlib import Path
 from datetime import datetime
 from flask import Blueprint, request, jsonify, current_app
-from app.models import db, League
+from app.models import db, Liga
 
 scrape_bp = Blueprint('scrape', __name__, url_prefix='/api/scrape')
 
@@ -232,17 +232,17 @@ def start_scrape():
         return jsonify({"error": "round must be a positive integer"}), 400
     
     # Validate league exists
-    league = League.query.filter_by(ogol_slug=league_slug).first()
+    league = Liga.query.filter_by(ogol_slug=league_slug).first()
     if not league:
         return jsonify({
             "error": f"League '{league_slug}' not found",
-            "available_leagues": [l.ogol_slug for l in League.query.all()]
+            "available_leagues": [l.ogol_slug for l in Liga.query.all()]
         }), 400
     
     # Validate round range
-    if round_num > league.num_rounds:
+    if round_num > league.num_rodadas:
         return jsonify({
-            "error": f"Round {round_num} exceeds maximum for {league.name} ({league.num_rounds} rounds)"
+            "error": f"Round {round_num} exceeds maximum for {league.nome} ({league.num_rodadas} rounds)"
         }), 400
     
     # Check if already running (Redis)
@@ -284,7 +284,7 @@ def start_scrape():
         job_data = {
             'job_id': job_id,
             'league': league_slug,
-            'league_name': league.name,
+            'league_name': league.nome,
             'year': year,
             'round': round_num,
             'status': 'queued',

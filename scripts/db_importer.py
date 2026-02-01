@@ -48,7 +48,7 @@ def get_or_create_season(cursor, league_slug: str, year: int) -> int:
         season_id
     """
     # Get league ID from ogol_slug
-    cursor.execute("SELECT id FROM leagues WHERE ogol_slug = %s", (league_slug,))
+    cursor.execute("SELECT id FROM ligas WHERE ogol_slug = %s", (league_slug,))
     league_row = cursor.fetchone()
     
     if not league_row:
@@ -58,8 +58,8 @@ def get_or_create_season(cursor, league_slug: str, year: int) -> int:
     
     # Get or create season
     cursor.execute("""
-        SELECT id FROM seasons 
-        WHERE league_id = %s AND year = %s
+        SELECT id FROM temporadas 
+        WHERE liga_id = %s AND ano = %s
     """, (league_id, year))
     
     season_row = cursor.fetchone()
@@ -70,7 +70,7 @@ def get_or_create_season(cursor, league_slug: str, year: int) -> int:
     # Create new season
     logger.info(f"Creating new season: {league_slug} {year}")
     cursor.execute("""
-        INSERT INTO seasons (league_id, year, is_current)
+        INSERT INTO temporadas (liga_id, ano, is_current)
         VALUES (%s, %s, TRUE)
         RETURNING id
     """, (league_id, year))
@@ -183,13 +183,13 @@ def insert_partida(cursor, data: dict, time_casa_id: int, time_fora_id: int,
     
     cursor.execute("""
         INSERT INTO partidas (
-            season_id, rodada, time_casa_id, time_fora_id, 
+            temporada_id, rodada, time_casa_id, time_fora_id, 
             gols_casa, gols_fora,
             gols_casa_intervalo, gols_fora_intervalo,
             data_hora, estadio_id, arbitro_id, publico, url_fonte, status,
             metadata
         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'finished', %s)
-        ON CONFLICT (season_id, rodada, time_casa_id, time_fora_id) 
+        ON CONFLICT (temporada_id, rodada, time_casa_id, time_fora_id) 
         DO UPDATE SET
             gols_casa = EXCLUDED.gols_casa,
             gols_fora = EXCLUDED.gols_fora,
@@ -228,7 +228,7 @@ def insert_estatisticas(cursor, partida_id: int, data: dict):
     }
     
     cursor.execute("""
-        INSERT INTO estatisticas_partida (
+        INSERT INTO estatisticas_partidas (
             partida_id,
             posse_casa, posse_fora,
             chutes_casa, chutes_fora,
@@ -262,7 +262,7 @@ def insert_estatisticas(cursor, partida_id: int, data: dict):
             xg_fora = EXCLUDED.xg_fora,
             passes_casa = EXCLUDED.passes_casa,
             passes_fora = EXCLUDED.passes_fora,
-            metadata = estatisticas_partida.metadata || EXCLUDED.metadata,
+            metadata = estatisticas_partidas.metadata || EXCLUDED.metadata,
             updated_at = CURRENT_TIMESTAMP
     """, (
         partida_id,
