@@ -1,7 +1,7 @@
 # RFC 002: Strict League & Season Association
 
 ## Status
-**Draft**
+**Status:** 📝 Draft (Aguardando Implementação)
 
 ## Context
 Currently, the relationship between a match (`Partida`) and its championship (`Liga`/`Temporada`) is determined implicitly by the arguments passed to the scraping script (`run_batch.py --league X --year Y`). The scraper extracts match details (teams, score, events) but relies on these external arguments to link the match to a season in the database.

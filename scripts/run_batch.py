@@ -51,15 +51,9 @@ class StructuredFormatter(logging.Formatter):
             log_obj.update(record.job_context)
         return json.dumps(log_obj, ensure_ascii=False)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),  # Human-readable for console
-        logging.FileHandler(LOG_DIR / "batch_run.log")
-    ]
-)
-logger = logging.getLogger(__name__)
+# Configuração de Logs (RFC 005)
+from app.utils.logger import get_logger
+logger = get_logger(__name__)
 
 # Add JSON handler for structured logs
 json_handler = logging.FileHandler(LOG_DIR / "batch_structured.log")

@@ -14,13 +14,15 @@ import json
 import logging
 import sys
 from playwright.sync_api import sync_playwright
+from dotenv import load_dotenv
+load_dotenv()
 
 # Configuração de Logs
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Configuração de Logs (RFC 005)
+import os
+sys.path.append(os.getcwd()) # Ensure root is in path
+from app.utils.logger import get_logger
+logger = get_logger(__name__)
 
 DEFAULT_URL_BASE = "https://www.ogol.com.br/competicao"
 

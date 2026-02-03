@@ -29,6 +29,10 @@ from app.models import db, Liga
 
 scrape_bp = Blueprint('scrape', __name__, url_prefix='/api/scrape')
 
+# Logging
+from app.utils.logger import get_logger
+logger = get_logger(__name__)
+
 # Redis Configuration
 REDIS_HOST = os.getenv('REDIS_HOST', 'localhost')
 REDIS_PORT = int(os.getenv('REDIS_PORT', 6379))
@@ -44,9 +48,9 @@ try:
     )
     # Ping to check connection
     redis_client.ping()
-    print(f"✅ Redis connected at {REDIS_HOST}:{REDIS_PORT}")
+    logger.info(f"✅ Redis connected at {REDIS_HOST}:{REDIS_PORT}")
 except Exception as e:
-    print(f"❌ Failed to connect to Redis: {e}")
+    logger.error(f"❌ Failed to connect to Redis: {e}")
     # We continue, but worker will fail loop if not connected
 
 # Redis Keys
@@ -64,7 +68,8 @@ def get_job(job_id):
         data = redis_client.hget(KEY_JOBS, job_id)
         return json.loads(data) if data else None
     except Exception as e:
-        print(f"Redis error in get_job: {e}")
+
+        logger.error("Redis error in get_job", extra={"error": str(e)})
         return None
 
 
@@ -74,7 +79,8 @@ def save_job(job_data):
         job_id = job_data['job_id']
         redis_client.hset(KEY_JOBS, job_id, json.dumps(job_data))
     except Exception as e:
-        print(f"Redis error in save_job: {e}")
+
+        logger.error("Redis error in save_job", extra={"error": str(e)})
 
 
 def load_jobs():
@@ -83,7 +89,8 @@ def load_jobs():
         raw = redis_client.hgetall(KEY_JOBS)
         return {k: json.loads(v) for k, v in raw.items()}
     except Exception as e:
-        print(f"Redis error in load_jobs: {e}")
+
+        logger.error("Redis error in load_jobs", extra={"error": str(e)})
         return {}
 
 
@@ -105,7 +112,7 @@ def scrape_worker():
     global worker_running
     worker_running = True
     
-    print("🔧 Scraping worker thread started (Redis backed)")
+    logger.info("🔧 Scraping worker thread started (Redis backed)")
     
     while worker_running:
         try:
@@ -123,7 +130,7 @@ def scrape_worker():
             # Refresh job data from Hash to get latest status
             current_job = get_job(job_id)
             if current_job and current_job.get('status') == 'cancelled':
-                print(f"⏭️  Skipping cancelled job: {job_id}")
+                logger.info("Skipping cancelled job", extra={"job_id": job_id})
                 continue
 
             # If job not in Hash, use the one from queue (fallback)
@@ -136,12 +143,14 @@ def scrape_worker():
             log_file = current_job['log_file']
             cmd = current_job['cmd']
             
-            print(f"\n{'='*60}")
-            print(f"🚀 PROCESSING JOB: {job_id}")
-            print(f"📋 League: {league_slug} | Year: {year} | Round: {round_num}")
-            print(f"📂 Log file: {log_file}")
-            print(f"⚙️  Command: {' '.join(cmd)}")
-            print(f"{'='*60}\n")
+            logger.info("🚀 Processing Job", extra={
+                "job_id": job_id,
+                "league": league_slug,
+                "year": year,
+                "round": round_num,
+                "log_file": log_file,
+                "cmd": cmd
+            })
             
             # Update job status to running
             current_job['status'] = 'processing'
@@ -164,7 +173,7 @@ def scrape_worker():
             
             # Stream logs to console in real-time
             for line in process.stdout:
-                print(f"[SCRAPE] {line.rstrip()}")
+                logger.info(line.strip(), extra={"job_id": job_id, "source": "subprocess"})
             
             process.wait()
             exit_code = process.returncode
@@ -183,20 +192,19 @@ def scrape_worker():
             
             save_job(current_job)
             
-            print(f"\n{'='*60}")
-            print(f"{'✅' if exit_code == 0 else '❌'} JOB COMPLETED: {job_id}")
-            print(f"Exit code: {exit_code}")
-            print(f"{'='*60}\n")
+            logger.info(f"{'✅' if exit_code == 0 else '❌'} Job Completed", extra={
+                "job_id": job_id,
+                "exit_code": exit_code,
+                "status": "success" if exit_code == 0 else "failed"
+            })
             
         except redis.ConnectionError:
-            print("❌ Redis connection lost in worker. Retrying...")
+            logger.error("❌ Redis connection lost in worker. Retrying...")
             time.sleep(5)
         except Exception as e:
-            print(f"❌ Worker error: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error("❌ Worker error", extra={"error": str(e)}, exc_info=True)
     
-    print("🛑 Scraping worker thread stopped")
+    logger.info("🛑 Scraping worker thread stopped")
 
 
 def start_worker():
@@ -207,7 +215,7 @@ def start_worker():
         worker_running = True
         worker_thread = threading.Thread(target=scrape_worker, daemon=True, name="ScrapeWorker")
         worker_thread.start()
-        print("✅ Scraping worker thread initialized")
+        logger.info("✅ Scraping worker thread initialized")
 
 
 # Start worker on module import

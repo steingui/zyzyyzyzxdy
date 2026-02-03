@@ -59,15 +59,9 @@ LOG_DIR.mkdir(exist_ok=True)
 
 LOG_TIMESTAMP = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stderr),
-        logging.FileHandler(LOG_DIR / f'scraper_{LOG_TIMESTAMP}.log', mode='a')
-    ]
-)
-logger = logging.getLogger(__name__)
+# Configuração de Logs (RFC 005)
+from app.utils.logger import get_logger
+logger = get_logger(__name__)
 
 
 class OgolScraper:

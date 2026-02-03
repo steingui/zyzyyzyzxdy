@@ -1,7 +1,7 @@
 # RFC: Arquitetura de Scraping Resiliente (Zero Tolerance)
 
 ## Status
-**Implementado (Fase 1) / Roadmap Atualizado**
+**Implementado (Fase 1 e 2) [Redis Persistência + Logs JSON]**
 
 ## Contexto
 O sistema evoluiu para uma arquitetura de "Zero Tolerância a Erros" na Fase 1. O foco agora é garantir persistência da fila, rotação de IPs e escalabilidade.

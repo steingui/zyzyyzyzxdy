@@ -1,6 +1,6 @@
 # RFC-002: Multi-League Support para REST API Endpoints
 
-**Status:** Proposta  
+**Status:** ✅ Implementado  
 **Data:** 2026-01-31  
 **Prioridade:** Alta  
 **Estimativa:** 3-5 dias

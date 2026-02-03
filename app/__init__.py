@@ -20,23 +20,18 @@ ma = Marshmallow()
 migrate = Migrate()
 cache = Cache()
 
-# Configurar logging estruturado
-class JSONFormatter(logging.Formatter):
-    def format(self, record):
-        log_obj = {
-            "timestamp": datetime.utcnow().isoformat(),
-            "level": record.levelname,
-            "message": record.getMessage(),
-            "module": record.module,
-            "function": record.funcName,
-        }
-        if record.exc_info:
-            log_obj["exception"] = self.formatException(record.exc_info)
-        return json.dumps(log_obj)
+# Configurar logging estruturado (RFC 005)
+from app.utils.logger import LLMFriendlyFormatter
 
 def setup_logging(app):
+    # Remove default handlers to avoid duplication
+    del app.logger.handlers[:]
+    
     handler = logging.StreamHandler()
-    handler.setFormatter(JSONFormatter())
+    formatter = LLMFriendlyFormatter(
+        '%(timestamp)s %(level)s %(name)s %(message)s'
+    )
+    handler.setFormatter(formatter)
     app.logger.addHandler(handler)
     app.logger.setLevel(logging.INFO)
 

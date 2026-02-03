@@ -24,15 +24,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configuração de logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stderr),
-        logging.FileHandler('logs/db_importer.log', mode='a')
-    ]
-)
-logger = logging.getLogger(__name__)
+# Configuração de Logs (RFC 005)
+sys.path.append(os.getcwd())
+from app.utils.logger import get_logger
+logger = get_logger(__name__)
 
 
 def get_or_create_season(cursor, league_slug: str, year: int) -> int:
