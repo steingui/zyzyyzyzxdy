@@ -9,7 +9,6 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import os
 import logging
-import json
 from datetime import datetime
 
 from app.config import Config
