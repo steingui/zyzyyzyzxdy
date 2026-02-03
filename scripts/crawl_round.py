@@ -67,11 +67,23 @@ def get_round_matches(round_num: int = None, league_slug: str = "brasileirao"):
                 logger.warning(f"Rodada {round_num} parece não ter jogos iniciados/terminados.")
                 return []
 
-            # Extrair links
+            # Extrair links (Apenas da primeira tabela para evitar rodadas futuras/duplicatas)
             links = page.evaluate("""() => {
                 const results = [];
-                const cells = document.querySelectorAll('#fixture_games td.result a[href*="/jogo/"]');
-                cells.forEach(a => results.push(a.href));
+                // Selecionar tabelas dentro do container
+                const tables = document.querySelectorAll('#fixture_games table');
+                
+                if (tables.length > 0) {
+                    // Assume que a primeira tabela é a rodada solicitada (padrão do filtro jornada_in)
+                    const targetTable = tables[0];
+                    const cells = targetTable.querySelectorAll('td.result a[href*="/jogo/"]');
+                    cells.forEach(a => results.push(a.href));
+                } else {
+                    // Fallback para comportamento antigo se não achar tabelas específicas (estrutura plana?)
+                    const cells = document.querySelectorAll('#fixture_games td.result a[href*="/jogo/"]');
+                    cells.forEach(a => results.push(a.href));
+                }
+                
                 return [...new Set(results)];
             }""")
             

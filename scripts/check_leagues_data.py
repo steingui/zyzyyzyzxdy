@@ -16,7 +16,7 @@ def check_data():
         print("=== Checking Leagues ===")
         leagues = Liga.query.all()
         for l in leagues:
-            print(f"League: {l.nome} (slug: {l.slug}, id: {l.id})")
+            print(f"League: {l.nome} (slug: {l.slug}, ogol_slug: {l.ogol_slug}, id: {l.id})")
             print(f"  Count Seasons: {len(l.temporadas)}")
             current = next((s for s in l.temporadas if s.is_current), None)
             if current:
