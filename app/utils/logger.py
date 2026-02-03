@@ -1,41 +1,57 @@
 import logging
 import sys
-import json
+import toon
 from datetime import datetime
-from pythonjsonlogger import jsonlogger
 
 # Configurable Max String Length for Token Economy
 MAX_STR_LENGTH = 1000
 MAX_LIST_SAMPLE = 5
 
-class LLMFriendlyFormatter(jsonlogger.JsonFormatter):
+class ToonFormatter(logging.Formatter):
     """
-    Custom JSON Formatter implementing RFC 005:
-    - Structured JSON
+    Custom TOON Formatter implementing RFC 005:
+    - TOON Format (Token-Oriented Object Notation)
     - Token Economy (Truncation, None removal)
     - ISO Timestamps
     """
     
-    def add_fields(self, log_record, record, message_dict):
-        super(LLMFriendlyFormatter, self).add_fields(log_record, record, message_dict)
+    def format(self, record):
+        # Build dictionary manually
+        record_dict = {
+            "timestamp": datetime.utcfromtimestamp(record.created).strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
+            "level": record.levelname,
+            "name": record.name,
+            "message": record.getMessage()
+        }
         
-        # Standardize timestamp
-        if not log_record.get('timestamp'):
-            log_record['timestamp'] = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ')
-            
-        # Standardize Level
-        if log_record.get('level'):
-            log_record['level'] = log_record['level'].upper()
-        else:
-            log_record['level'] = record.levelname
-            
-        # Remove redundancy
-        log_record.pop('levelname', None)
-        log_record.pop('asctime', None)
-        log_record.pop('exc_info', None) # Handled by jsonlogger usually, but we want clean output
+        # Add extra fields (those passed in extra={...})
+        # Exclude standard attributes
+        standard_keys = [
+            'args', 'asctime', 'created', 'exc_info', 'exc_text', 'filename',
+            'funcName', 'levelname', 'levelno', 'lineno', 'module', 'msecs',
+            'message', 'msg', 'name', 'pathname', 'process', 'processName',
+            'relativeCreated', 'stack_info', 'thread', 'threadName', 'timestamp'
+        ]
+        
+        for key, value in record.__dict__.items():
+            if key not in standard_keys and not key.startswith('_'):
+                record_dict[key] = value
+
+        # Exception handling
+        if record.exc_info:
+             if not record.exc_text:
+                 record.exc_text = self.formatException(record.exc_info)
+             record_dict['exception'] = record.exc_text
 
         # Token Economy: Process all fields
-        self._economize_tokens(log_record)
+        self._economize_tokens(record_dict)
+        
+        # Encode to TOON
+        try:
+            return toon.encode(record_dict)
+        except Exception:
+            # Fallback if encoding fails
+            return str(record_dict)
 
     def _economize_tokens(self, data):
         """
@@ -88,10 +104,8 @@ def get_logger(name, level=logging.INFO):
     # Console Handler (Stderr to avoid polluting stdout data pipes)
     handler = logging.StreamHandler(sys.stderr)
     
-    # JSON Formatter
-    formatter = LLMFriendlyFormatter(
-        '%(timestamp)s %(level)s %(name)s %(message)s'
-    )
+    # TOON Formatter
+    formatter = ToonFormatter()
     handler.setFormatter(formatter)
     
     logger.addHandler(handler)

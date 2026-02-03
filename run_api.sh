@@ -55,12 +55,4 @@ export FLASK_ENV=production
 export CACHE_REDIS_URL=${CACHE_REDIS_URL:-redis://localhost:6379/0}
 
 
-# Validar se jq está instalado para formatação
-if command -v jq &> /dev/null; then
-    echo "✨ JQ detectado: Logs serão formatados automaticamente."
-    # jq -R -r '. as $line | try fromjson catch $line' : Tenta parsear JSON, senão imprime a linha crua
-    flask run --host=0.0.0.0 --port=$PORT 2>&1 | jq --unbuffered -R -r '. as $line | try fromjson catch $line'
-else
-    echo "⚠️  JQ não encontrado. Logs serão exibidos em formato RAW (JSON linear)."
-    flask run --host=0.0.0.0 --port=$PORT
-fi
+flask run --host=0.0.0.0 --port=$PORT

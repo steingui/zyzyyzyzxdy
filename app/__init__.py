@@ -20,17 +20,15 @@ ma = Marshmallow()
 migrate = Migrate()
 cache = Cache()
 
-# Configurar logging estruturado (RFC 005)
-from app.utils.logger import LLMFriendlyFormatter
+# Configurar logging estruturado (RFC 005 - TOON)
+from app.utils.logger import ToonFormatter
 
 def setup_logging(app):
     # Remove default handlers to avoid duplication
     del app.logger.handlers[:]
     
     handler = logging.StreamHandler()
-    formatter = LLMFriendlyFormatter(
-        '%(timestamp)s %(level)s %(name)s %(message)s'
-    )
+    formatter = ToonFormatter()
     handler.setFormatter(formatter)
     app.logger.addHandler(handler)
     app.logger.setLevel(logging.INFO)
