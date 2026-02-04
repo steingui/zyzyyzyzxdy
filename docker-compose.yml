@@ -57,25 +57,6 @@ services:
     networks:
       - brasileirao-net
 
-  # Celery Worker (Isolated Scraper)
-  worker:
-    build: .
-    container_name: brasileirao-worker
-    command: [ "celery", "-A", "app.celery_app", "worker", "--loglevel=info", "--concurrency=1" ]
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    environment:
-      DATABASE_URL: postgresql://brasileirao:brasileirao2026@db:5432/brasileirao_2026
-      REDIS_URL: redis://redis:6379/0
-    volumes:
-      - ./logs:/app/logs
-      - ./data:/app/data
-    networks:
-      - brasileirao-net
-
 volumes:
   postgres_data:
   redis_data:

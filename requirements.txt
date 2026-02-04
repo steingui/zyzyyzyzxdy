@@ -51,4 +51,4 @@ asgiref==3.11.0
 python-json-logger==4.0.0
 python-toon
 gunicorn==21.2.0
-celery[redis]==5.4.0
+psutil==5.9.8

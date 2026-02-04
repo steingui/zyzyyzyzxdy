@@ -7,12 +7,6 @@ Queue-based system (Redis):
 - Background worker thread processes queue from Redis
 - Jobs metadata stored in Redis Hash 'scrape:jobs'
 - Persistent across restarts
-
-Endpoints:
-- POST /api/scrape - Enqueue a scraping job
-- GET /api/scrape/status/<job_id> - Get job status
-- GET /api/scrape/jobs - List all jobs
-- GET /api/scrape/queue - View pending queue
 """
 
 import subprocess
@@ -22,11 +16,11 @@ import time
 import signal
 import threading
 import redis
+import psutil
 from pathlib import Path
 from datetime import datetime
 from flask import Blueprint, request, jsonify, current_app
 from app.models import db, Liga
-
 
 scrape_bp = Blueprint('scrape', __name__, url_prefix='/api/scrape')
 
@@ -35,42 +29,16 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 
 # Redis Configuration
-REDIS_URL = os.getenv('REDIS_URL')
-REDIS_HOST = os.getenv('REDIS_HOST', 'localhost')
-REDIS_PORT = int(os.getenv('REDIS_PORT', 6379))
-REDIS_DB = int(os.getenv('REDIS_DB', 0))
-
-# Initialize Redis
-try:
-    if REDIS_URL:
-        logger.info(f"🔌 Connecting to Redis via REDIS_URL...")
-        redis_client = redis.from_url(REDIS_URL, decode_responses=True)
-    else:
-        logger.info(f"🔌 Connecting to Redis via {REDIS_HOST}:{REDIS_PORT}...")
-        redis_client = redis.Redis(
-            host=REDIS_HOST, 
-            port=REDIS_PORT, 
-            db=REDIS_DB, 
-            decode_responses=True
-        )
-    # Ping to check connection
-    redis_client.ping()
-    if REDIS_URL:
-        # Hide password in logs if present
-        safe_url = REDIS_URL.split('@')[-1] if '@' in REDIS_URL else REDIS_URL
-        logger.info(f"✅ Redis connected via REDIS_URL ({safe_url})")
-    else:
-        logger.info(f"✅ Redis connected at {REDIS_HOST}:{REDIS_PORT}")
-except Exception as e:
-    logger.error(f"❌ Failed to connect to Redis: {e}")
-    # We continue, but worker will fail loop if not connected
+REDIS_URL = os.getenv('REDIS_URL', os.getenv('CACHE_REDIS_URL', 'redis://localhost:6379/0'))
+redis_client = redis.from_url(REDIS_URL, decode_responses=True)
 
 # Redis Keys
+KEY_QUEUE = "scrape:queue"
 KEY_JOBS = "scrape:jobs"
 
-# Import Celery task
-from app.tasks import scrape_job
-
+# Worker controls (In-process thread)
+worker_thread = None
+worker_running = False
 
 def get_job(job_id):
     """Get single job from Redis"""
@@ -81,7 +49,6 @@ def get_job(job_id):
         logger.error("Redis error in get_job", extra={"error": str(e)})
         return None
 
-
 def save_job(job_data):
     """Save/Update single job in Redis"""
     try:
@@ -89,7 +56,6 @@ def save_job(job_data):
         redis_client.hset(KEY_JOBS, job_id, json.dumps(job_data))
     except Exception as e:
         logger.error("Redis error in save_job", extra={"error": str(e)})
-
 
 def load_jobs():
     """Load all jobs from Redis"""
@@ -100,13 +66,90 @@ def load_jobs():
         logger.error("Redis error in load_jobs", extra={"error": str(e)})
         return {}
 
+def is_process_running(pid):
+    """Check if process with PID is still running"""
+    try:
+        return psutil.pid_exists(pid)
+    except:
+        return False
+
+def scrape_worker():
+    """
+    Background worker that consumes a Redis list queue.
+    Runs one job at a time.
+    """
+    global worker_running
+    logger.info("🚀 Scraping worker thread started")
+    
+    while worker_running:
+        try:
+            # Block until a job is available (timeout 5s)
+            result = redis_client.blpop(KEY_QUEUE, timeout=5)
+            if not result:
+                continue
+            
+            _, job_json = result
+            job_data = json.loads(job_json)
+            job_id = job_data['job_id']
+            cmd = job_data['cmd']
+            log_file = job_data['log_file']
+            
+            logger.info(f"👷 Processing job {job_id}: {' '.join(cmd)}")
+            
+            # Update status to processing
+            job_data['status'] = 'processing'
+            job_data['processing_started_at'] = datetime.utcnow().isoformat() + 'Z'
+            save_job(job_data)
+            
+            # Run the process
+            with open(log_file, 'w') as f:
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=f,
+                    stderr=subprocess.STDOUT,
+                    preexec_fn=os.setsid  # Create process group for easier cancellation
+                )
+                
+                job_data['pid'] = process.pid
+                save_job(job_data)
+                
+                # Wait for completion
+                exit_code = process.wait()
+            
+            # Update completion status
+            job_data['status'] = 'completed' if exit_code == 0 else 'failed'
+            job_data['completed_at'] = datetime.utcnow().isoformat() + 'Z'
+            job_data['exit_code'] = exit_code
+            save_job(job_data)
+            
+            logger.info(f"✅ Job {job_id} finished with code {exit_code}")
+            
+        except redis.ConnectionError:
+            logger.error("❌ Redis connection lost in worker. Retrying...")
+            time.sleep(5)
+        except Exception as e:
+            logger.error("❌ Worker error", extra={"error": str(e)}, exc_info=True)
+    
+    logger.info("🛑 Scraping worker thread stopped")
+
+def start_worker():
+    """Start the background worker thread if not already running"""
+    global worker_thread, worker_running
+    
+    if worker_thread is None or not worker_thread.is_alive():
+        worker_running = True
+        worker_thread = threading.Thread(target=scrape_worker, daemon=True, name="ScrapeWorker")
+        worker_thread.start()
+        logger.info("✅ Scraping worker thread initialized")
+
+# Start worker on module import
+start_worker()
 
 @scrape_bp.route('', methods=['POST'])
 def start_scrape():
-    """Start a scraping job via Celery"""
+    """Start a scraping job (Legacy Threading)"""
     data = request.get_json()
     
-    # Validate input
     league_slug = data.get('league')
     year = data.get('year')
     round_num = data.get('round')
@@ -114,185 +157,88 @@ def start_scrape():
     if not all([league_slug, year, round_num]):
         return jsonify({"error": "league, year, and round are required"}), 400
     
-    if not isinstance(round_num, int) or round_num < 1:
-        return jsonify({"error": "round must be a positive integer"}), 400
-    
-    # Validate league exists
+    # Validate league
     league = Liga.query.filter_by(ogol_slug=league_slug).first()
     if not league:
-        return jsonify({
-            "error": f"League '{league_slug}' not found",
-            "available_leagues": [l.ogol_slug for l in Liga.query.all()]
-        }), 400
+        return jsonify({"error": f"League '{league_slug}' not found"}), 400
     
-    # Validate round range
-    if round_num > league.num_rodadas:
-        return jsonify({
-            "error": f"Round {round_num} exceeds maximum for {league.nome} ({league.num_rodadas} rounds)"
-        }), 400
-    
-    # Check if already running (Redis)
-    jobs = load_jobs()
-    for existing_job in jobs.values():
-        if (existing_job.get('league') == league_slug and 
-            existing_job.get('year') == year and 
-            existing_job.get('round') == round_num and 
-            existing_job.get('status') in ['queued', 'processing']):
-            
-            return jsonify({
-                "message": "Job already exists in queue/processing",
-                "job_id": existing_job.get('job_id'),
-                "status": existing_job.get('status')
-            }), 409
-  
     # Create job ID
     timestamp = int(time.time())
     job_id = f"scrape_{league_slug}_{year}_{round_num}_{timestamp}"
     
-    # Prepare log file path
+    # Log file
     log_dir = Path('logs')
     log_dir.mkdir(exist_ok=True)
     log_file = log_dir / f"scrape_{league_slug}_{year}_r{round_num}.log"
     
-    current_app.logger.info(f"Triggering Celery scrape job: {job_id}")
+    # Build command
+    cmd = ["python3", "scripts/run_batch.py", str(round_num), "--league", league_slug, "--year", str(year)]
     
-    try:
-        job_data = {
-            'job_id': job_id,
-            'league': league_slug,
-            'league_name': league.nome,
-            'year': year,
-            'round': round_num,
-            'status': 'queued',
-            'enqueued_at': datetime.utcnow().isoformat() + 'Z',
-            'log_file': str(log_file),
-            'matches_scraped': 0,
-            'total_matches': 0
-        }
-        
-        # Save to Redis Metadata
-        save_job(job_data)
-        
-        # Trigger Celery Task
-        task = scrape_job.delay(league_slug, year, round_num, job_id)
-        
-        # Update metadata with Celery task ID
-        job_data['celery_task_id'] = task.id
-        save_job(job_data)
-        
-        return jsonify({
-            "status": "queued",
-            "job_id": job_id,
-            "celery_task_id": task.id,
-            "message": "Job enqueued successfully (Celery).",
-            "log_file": str(log_file)
-        }), 202
-        
-    except Exception as e:
-        current_app.logger.error(f"Failed to trigger Celery job: {e}")
-        return jsonify({
-            "error": "Failed to start scraping job",
-            "details": str(e)
-        }), 500
-
+    job_data = {
+        'job_id': job_id,
+        'league': league_slug,
+        'league_name': league.nome,
+        'year': year,
+        'round': round_num,
+        'status': 'queued',
+        'enqueued_at': datetime.utcnow().isoformat() + 'Z',
+        'log_file': str(log_file),
+        'cmd': cmd
+    }
+    
+    save_job(job_data)
+    redis_client.rpush(KEY_QUEUE, json.dumps(job_data))
+    
+    return jsonify({
+        "status": "queued",
+        "job_id": job_id,
+        "message": "Job enqueued (Local Threating).",
+        "log_file": str(log_file)
+    }), 202
 
 @scrape_bp.route('/status/<job_id>', methods=['GET'])
 def get_status(job_id):
-    """Get status of a scraping job from Redis"""
     job = get_job(job_id)
-    
     if not job:
         return jsonify({"error": "Job not found"}), 404
-    
     return jsonify(job)
-
 
 @scrape_bp.route('/jobs', methods=['GET'])
 def list_jobs():
-    """List all scraping jobs from Redis"""
     jobs = load_jobs()
-    
-    # Filters
-    status_filter = request.args.get('status')
-    league_filter = request.args.get('league')
-    limit = int(request.args.get('limit', 50))
-    
-    filtered_jobs = list(jobs.values())
-    
-    if status_filter:
-        filtered_jobs = [j for j in filtered_jobs if j.get('status') == status_filter]
-    
-    if league_filter:
-        filtered_jobs = [j for j in filtered_jobs if j.get('league') == league_filter]
-    
-    # Sort by enqueued_at desc (newest first)
-    filtered_jobs.sort(key=lambda x: x.get('enqueued_at', ''), reverse=True)
-    
-    # Limit
-    filtered_jobs = filtered_jobs[:limit]
-    
-    return jsonify({
-        "total": len(filtered_jobs),
-        "jobs": filtered_jobs
-    })
-
+    job_list = sorted(jobs.values(), key=lambda x: x.get('enqueued_at', ''), reverse=True)
+    return jsonify({"jobs": job_list, "total": len(job_list)})
 
 @scrape_bp.route('/cancel/<job_id>', methods=['POST'])
 def cancel_job(job_id):
-    """Cancel a running scraping job via Celery"""
     job = get_job(job_id)
-    
     if not job:
         return jsonify({"error": "Job not found"}), 404
     
-    if job.get('status') not in ['queued', 'processing']:
-        return jsonify({"error": "Job is not running or queued"}), 400
-    
-    task_id = job.get('celery_task_id')
-    if task_id:
-        from app.celery_app import celery_app
-        celery_app.control.revoke(task_id, terminate=True, signal='SIGTERM')
-        logger.info(f"Revoked Celery task {task_id}")
-    
-    job['status'] = 'cancelled'
-    job['cancelled_at'] = datetime.utcnow().isoformat() + 'Z'
-    save_job(job)
-    
-    return jsonify({
-        "status": "cancelled",
-        "job_id": job_id,
-        "message": "Job cancellation request sent to Celery"
-    })
-
+    pid = job.get('pid')
+    if pid and is_process_running(pid):
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGTERM)
+            logger.info(f"Cancelled job {job_id} (PID {pid})")
+            job['status'] = 'cancelled'
+            save_job(job)
+            return jsonify({"status": "cancelled", "job_id": job_id})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+            
+    return jsonify({"error": "Job not running"}), 400
 
 @scrape_bp.route('/queue', methods=['GET'])
 def get_queue_status():
-    """Get current queue status (simplified for Celery)"""
-    jobs = load_jobs()
-    processing_job = next(
-        (job for job in jobs.values() if job.get('status') == 'processing'),
-        None
-    )
-    
+    q_size = redis_client.llen(KEY_QUEUE)
     return jsonify({
-        "processing_job": processing_job,
-        "celery_active": True # Assumption if the API is up and using Celery
+        "queue_size": q_size,
+        "worker_running": worker_running,
+        "worker_alive": worker_thread.is_alive() if worker_thread else False
     })
-
 
 @scrape_bp.route('/flush', methods=['DELETE'])
 def flush_queue():
-    """Flush the job history hash from Redis (Admin utility)"""
-    try:
-        # Clear jobs hash
-        redis_client.delete(KEY_JOBS)
-        
-        return jsonify({
-            "message": "Redis job history flushed successfully.",
-            "keys_deleted": [KEY_JOBS]
-        }), 200
-    except Exception as e:
-        return jsonify({
-            "error": "Failed to flush Redis",
-            "details": str(e)
-        }), 500
+    redis_client.delete(KEY_QUEUE)
+    redis_client.delete(KEY_JOBS)
+    return jsonify({"message": "Queue flushed"})
