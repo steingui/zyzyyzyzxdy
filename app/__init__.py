@@ -3,7 +3,6 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_marshmallow import Marshmallow
 from flask_migrate import Migrate
 from flask_caching import Cache
-from flask_swagger_ui import get_swaggerui_blueprint
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -108,7 +107,7 @@ def create_app(config_class=Config):
 
     @app.route('/health')
     def health_check():
-        return {'status': 'healthy', 'version': '3.0.0'}, 200
+        return {'status': 'healthy', 'version': '6.0.0'}, 200
     
     # Security: HTTP Security Headers
     @app.after_request
