@@ -75,48 +75,20 @@ def create_app(config_class=Config):
     app.register_blueprint(analytics_bp, url_prefix='/api/analytics')
     app.register_blueprint(scrape_bp)  # Já tem url_prefix='/api/scrape' no blueprint
 
-    # Swagger UI - English
-    SWAGGER_URL_EN = '/api/docs/en'
-    API_URL_EN = '/openapi-en.yaml'
-    swaggerui_bp_en = get_swaggerui_blueprint(
-        SWAGGER_URL_EN,
-        API_URL_EN,
-        config={'app_name': "BR-Statistics Hub API (EN)"},
-        blueprint_name='swagger_ui_en'
-    )
-    app.register_blueprint(swaggerui_bp_en, url_prefix=SWAGGER_URL_EN)
+    # V2 Blueprints
+    from app.blueprints.v2.matches import matches_v2_bp
+    app.register_blueprint(matches_v2_bp, url_prefix='/api/v2/matches')
+
+    # Code-First Swagger (V2)
+    from app.swagger import swagger_bp as swagger_v2_bp
+    app.register_blueprint(swagger_v2_bp)
     
-    # Swagger UI - Portuguese
-    SWAGGER_URL_PT = '/api/docs/pt'
-    API_URL_PT = '/openapi-pt.yaml'
-    swaggerui_bp_pt = get_swaggerui_blueprint(
-        SWAGGER_URL_PT,
-        API_URL_PT,
-        config={'app_name': "BR-Statistics Hub API (PT-BR)"},
-        blueprint_name='swagger_ui_pt'
-    )
-    app.register_blueprint(swaggerui_bp_pt, url_prefix=SWAGGER_URL_PT)
+    # Swagger UI (Code-First)
+    from app.routes.swagger_ui import swagger_ui
+    app.add_url_rule('/api/docs', 'swagger_ui', swagger_ui)
     
-    # Servir os arquivos OpenAPI
-    @app.route('/openapi-en.yaml')
-    def openapi_spec_en():
-        from flask import send_from_directory
-        import os
-        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        return send_from_directory(project_root, 'openapi-en.yaml')
-    
-    @app.route('/openapi-pt.yaml')
-    def openapi_spec_pt():
-        from flask import send_from_directory
-        import os
-        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        return send_from_directory(project_root, 'openapi-pt.yaml')
-    
-    # Redirect /api/docs to English by default
-    @app.route('/api/docs')
-    def redirect_to_docs():
-        from flask import redirect
-        return redirect('/api/docs/en')
+    # Legacy Swagger/OpenAPI files removed
+    # Redirects handled by new UI serving from /api/docs
 
     # Error Handlers
     @app.errorhandler(404)
