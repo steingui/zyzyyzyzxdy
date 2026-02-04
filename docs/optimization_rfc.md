@@ -14,7 +14,7 @@ Este documento propõe otimizações críticas e incrementais para a codebase do
 
 ## 🎯 Otimizações Críticas (Alta Prioridade)
 
-### 1. **Substituir JSON File Storage por Redis**
+### 1. **Substituir JSON File Storage por Redis** (✅ IMPLEMENTADO v3.5.0)
 
 **Problema:** `data/scrape_jobs.json` não é thread-safe e não escala
 

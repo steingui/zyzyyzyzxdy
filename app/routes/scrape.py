@@ -35,18 +35,24 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 
 # Redis Configuration
+REDIS_URL = os.getenv('REDIS_URL')
 REDIS_HOST = os.getenv('REDIS_HOST', 'localhost')
 REDIS_PORT = int(os.getenv('REDIS_PORT', 6379))
 REDIS_DB = int(os.getenv('REDIS_DB', 0))
 
 # Initialize Redis
 try:
-    redis_client = redis.Redis(
-        host=REDIS_HOST, 
-        port=REDIS_PORT, 
-        db=REDIS_DB, 
-        decode_responses=True
-    )
+    if REDIS_URL:
+        logger.info(f"🔌 Connecting to Redis via REDIS_URL...")
+        redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+    else:
+        logger.info(f"🔌 Connecting to Redis via {REDIS_HOST}:{REDIS_PORT}...")
+        redis_client = redis.Redis(
+            host=REDIS_HOST, 
+            port=REDIS_PORT, 
+            db=REDIS_DB, 
+            decode_responses=True
+        )
     # Ping to check connection
     redis_client.ping()
     logger.info(f"✅ Redis connected at {REDIS_HOST}:{REDIS_PORT}")
