@@ -43,7 +43,7 @@ class Temporada(db.Model):
 
     # Indexes
     __table_args__ = (
-        Index('idx_temporadas_current', 'liga_id', postgresql_where=(is_current == True)),
+        Index('idx_active_seasons', 'liga_id', postgresql_where=(is_current == True)),
     )
 
 class TimeTemporada(db.Model):
@@ -71,6 +71,7 @@ class TimeTemporada(db.Model):
     __table_args__ = (
         db.UniqueConstraint('time_id', 'temporada_id', name='time_temporada_unica'),
         Index('idx_times_temporadas_posicao', 'temporada_id', 'posicao'),
+        Index('idx_team_seasons_lookup', 'time_id', 'temporada_id'),
     )
 
 # ====================
@@ -159,6 +160,9 @@ class Partida(db.Model):
         # Team History High-Performance Indexes
         Index('idx_partidas_time_casa_history', 'time_casa_id', 'data_hora'),
         Index('idx_partidas_time_fora_history', 'time_fora_id', 'data_hora'),
+        # RFC Optimization Indexes
+        Index('idx_partidas_season_round', 'temporada_id', 'rodada'),
+        Index('idx_partidas_teams', 'time_casa_id', 'time_fora_id'),
         # Uniqueness
         db.UniqueConstraint('temporada_id', 'rodada', 'time_casa_id', 'time_fora_id', name='partida_unica'),
     )

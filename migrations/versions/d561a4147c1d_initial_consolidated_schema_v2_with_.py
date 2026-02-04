@@ -1,8 +1,8 @@
-"""Refactor v1: Standardize PT and Optimize
+"""initial: consolidated schema v2 with optimizations
 
-Revision ID: d6ec278b8be0
+Revision ID: d561a4147c1d
 Revises: 
-Create Date: 2026-01-31 22:33:47.704995
+Create Date: 2026-02-03 23:01:04.905939
 
 """
 from alembic import op
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision = 'd6ec278b8be0'
+revision = 'd561a4147c1d'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -44,7 +44,7 @@ def upgrade():
     sa.Column('num_times', sa.Integer(), nullable=True),
     sa.Column('num_rodadas', sa.Integer(), nullable=True),
     sa.Column('ogol_slug', sa.String(length=100), nullable=True),
-    sa.Column('metadata', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('metadata', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=True),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('nome'),
@@ -58,13 +58,13 @@ def upgrade():
     sa.Column('data_fim', sa.Date(), nullable=True),
     sa.Column('is_current', sa.Boolean(), nullable=True),
     sa.Column('ogol_edition_id', sa.String(length=50), nullable=True),
-    sa.Column('metadata', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('metadata', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=True),
     sa.ForeignKeyConstraint(['liga_id'], ['ligas.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
     with op.batch_alter_table('temporadas', schema=None) as batch_op:
-        batch_op.create_index('idx_temporadas_current', ['liga_id'], unique=False, postgresql_where=sa.text('is_current = true'))
+        batch_op.create_index('idx_active_seasons', ['liga_id'], unique=False, postgresql_where=sa.text('is_current = true'))
 
     op.create_table('times',
     sa.Column('id', sa.Integer(), nullable=False),
@@ -84,7 +84,7 @@ def upgrade():
     sa.Column('nacionalidade', sa.String(length=50), nullable=True),
     sa.Column('data_nascimento', sa.Date(), nullable=True),
     sa.Column('id_fonte', sa.String(length=100), nullable=True),
-    sa.Column('metadata', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('metadata', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=True),
     sa.ForeignKeyConstraint(['time_atual_id'], ['times.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
@@ -96,16 +96,23 @@ def upgrade():
     sa.Column('time_fora_id', sa.Integer(), nullable=False),
     sa.Column('gols_casa', sa.Integer(), nullable=True),
     sa.Column('gols_fora', sa.Integer(), nullable=True),
+    sa.Column('gols_casa_intervalo', sa.Integer(), nullable=True),
+    sa.Column('gols_fora_intervalo', sa.Integer(), nullable=True),
     sa.Column('data_hora', sa.DateTime(), nullable=True),
     sa.Column('estadio_id', sa.Integer(), nullable=True),
     sa.Column('arbitro_id', sa.Integer(), nullable=True),
     sa.Column('publico', sa.Integer(), nullable=True),
     sa.Column('status', sa.String(length=20), nullable=True),
     sa.Column('url_fonte', sa.String(length=255), nullable=True),
-    sa.Column('metadata', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('metadata', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=True),
+    sa.Column('updated_at', sa.DateTime(), nullable=True),
+    sa.Column('start_time', sa.DateTime(), nullable=True),
+    sa.Column('liga_id', sa.Integer(), nullable=True),
+    sa.Column('ano', sa.Integer(), nullable=True),
     sa.ForeignKeyConstraint(['arbitro_id'], ['arbitros.id'], ),
     sa.ForeignKeyConstraint(['estadio_id'], ['estadios.id'], ),
+    sa.ForeignKeyConstraint(['liga_id'], ['ligas.id'], ),
     sa.ForeignKeyConstraint(['temporada_id'], ['temporadas.id'], ),
     sa.ForeignKeyConstraint(['time_casa_id'], ['times.id'], ),
     sa.ForeignKeyConstraint(['time_fora_id'], ['times.id'], ),
@@ -115,6 +122,8 @@ def upgrade():
     )
     with op.batch_alter_table('partidas', schema=None) as batch_op:
         batch_op.create_index('idx_partidas_dashboard', ['temporada_id', 'status', 'data_hora'], unique=False, postgresql_include=['id', 'time_casa_id', 'time_fora_id', 'gols_casa', 'gols_fora'])
+        batch_op.create_index('idx_partidas_season_round', ['temporada_id', 'rodada'], unique=False)
+        batch_op.create_index('idx_partidas_teams', ['time_casa_id', 'time_fora_id'], unique=False)
         batch_op.create_index('idx_partidas_time_casa_history', ['time_casa_id', 'data_hora'], unique=False)
         batch_op.create_index('idx_partidas_time_fora_history', ['time_fora_id', 'data_hora'], unique=False)
 
@@ -130,7 +139,7 @@ def upgrade():
     sa.Column('derrotas', sa.Integer(), nullable=True),
     sa.Column('gols_pro', sa.Integer(), nullable=True),
     sa.Column('gols_contra', sa.Integer(), nullable=True),
-    sa.Column('metadata', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('metadata', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=True),
     sa.Column('updated_at', sa.DateTime(), nullable=True),
     sa.ForeignKeyConstraint(['temporada_id'], ['temporadas.id'], ),
@@ -139,14 +148,35 @@ def upgrade():
     sa.UniqueConstraint('time_id', 'temporada_id', name='time_temporada_unica')
     )
     with op.batch_alter_table('times_temporadas', schema=None) as batch_op:
+        batch_op.create_index('idx_team_seasons_lookup', ['time_id', 'temporada_id'], unique=False)
         batch_op.create_index('idx_times_temporadas_posicao', ['temporada_id', 'posicao'], unique=False)
 
+    op.create_table('escalacoes',
+    sa.Column('partida_id', sa.Integer(), nullable=False),
+    sa.Column('jogador_id', sa.Integer(), nullable=False),
+    sa.Column('time_id', sa.Integer(), nullable=False),
+    sa.Column('titular', sa.Boolean(), nullable=True),
+    sa.Column('numero_camisa', sa.String(length=10), nullable=True),
+    sa.Column('nota', sa.Float(), nullable=True),
+    sa.Column('stats', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=True),
+    sa.Column('created_at', sa.DateTime(), nullable=True),
+    sa.ForeignKeyConstraint(['jogador_id'], ['jogadores.id'], ),
+    sa.ForeignKeyConstraint(['partida_id'], ['partidas.id'], ),
+    sa.ForeignKeyConstraint(['time_id'], ['times.id'], ),
+    sa.PrimaryKeyConstraint('partida_id', 'jogador_id')
+    )
     op.create_table('estatisticas_partidas',
     sa.Column('partida_id', sa.Integer(), nullable=False),
     sa.Column('posse_casa', sa.Integer(), nullable=True),
     sa.Column('posse_fora', sa.Integer(), nullable=True),
     sa.Column('chutes_casa', sa.Integer(), nullable=True),
     sa.Column('chutes_fora', sa.Integer(), nullable=True),
+    sa.Column('chutes_gol_casa', sa.Integer(), nullable=True),
+    sa.Column('chutes_gol_fora', sa.Integer(), nullable=True),
+    sa.Column('chutes_bloqueados_casa', sa.Integer(), nullable=True),
+    sa.Column('chutes_bloqueados_fora', sa.Integer(), nullable=True),
+    sa.Column('escanteios_casa', sa.Integer(), nullable=True),
+    sa.Column('escanteios_fora', sa.Integer(), nullable=True),
     sa.Column('xg_casa', sa.Float(), nullable=True),
     sa.Column('xg_fora', sa.Float(), nullable=True),
     sa.Column('xgot_casa', sa.Float(), nullable=True),
@@ -175,7 +205,7 @@ def upgrade():
     sa.Column('duelos_ganhos_fora', sa.Integer(), nullable=True),
     sa.Column('duelos_aereos_ganhos_casa', sa.Integer(), nullable=True),
     sa.Column('duelos_aereos_ganhos_fora', sa.Integer(), nullable=True),
-    sa.Column('metadata', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('metadata', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=True),
     sa.Column('updated_at', sa.DateTime(), nullable=True),
     sa.ForeignKeyConstraint(['partida_id'], ['partidas.id'], ),
     sa.PrimaryKeyConstraint('partida_id')
@@ -188,11 +218,14 @@ def upgrade():
     sa.Column('partida_id', sa.Integer(), nullable=False),
     sa.Column('tipo', sa.String(length=50), nullable=False),
     sa.Column('minuto', sa.Integer(), nullable=True),
+    sa.Column('minuto_adicional', sa.Integer(), nullable=True),
     sa.Column('periodo', sa.Integer(), nullable=True),
     sa.Column('time_id', sa.Integer(), nullable=True),
     sa.Column('jogador_id', sa.Integer(), nullable=True),
+    sa.Column('jogador_secundario_id', sa.Integer(), nullable=True),
     sa.Column('descricao', sa.Text(), nullable=True),
     sa.ForeignKeyConstraint(['jogador_id'], ['jogadores.id'], ),
+    sa.ForeignKeyConstraint(['jogador_secundario_id'], ['jogadores.id'], ),
     sa.ForeignKeyConstraint(['partida_id'], ['partidas.id'], ),
     sa.ForeignKeyConstraint(['time_id'], ['times.id'], ),
     sa.PrimaryKeyConstraint('id')
@@ -213,20 +246,24 @@ def downgrade():
         batch_op.drop_index('idx_estatisticas_xg')
 
     op.drop_table('estatisticas_partidas')
+    op.drop_table('escalacoes')
     with op.batch_alter_table('times_temporadas', schema=None) as batch_op:
         batch_op.drop_index('idx_times_temporadas_posicao')
+        batch_op.drop_index('idx_team_seasons_lookup')
 
     op.drop_table('times_temporadas')
     with op.batch_alter_table('partidas', schema=None) as batch_op:
         batch_op.drop_index('idx_partidas_time_fora_history')
         batch_op.drop_index('idx_partidas_time_casa_history')
+        batch_op.drop_index('idx_partidas_teams')
+        batch_op.drop_index('idx_partidas_season_round')
         batch_op.drop_index('idx_partidas_dashboard', postgresql_include=['id', 'time_casa_id', 'time_fora_id', 'gols_casa', 'gols_fora'])
 
     op.drop_table('partidas')
     op.drop_table('jogadores')
     op.drop_table('times')
     with op.batch_alter_table('temporadas', schema=None) as batch_op:
-        batch_op.drop_index('idx_temporadas_current', postgresql_where=sa.text('is_current = true'))
+        batch_op.drop_index('idx_active_seasons', postgresql_where=sa.text('is_current = true'))
 
     op.drop_table('temporadas')
     op.drop_table('ligas')

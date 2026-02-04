@@ -13,6 +13,7 @@ RUN playwright install chromium
 # Copy application code
 COPY app/ ./app/
 COPY scripts/ ./scripts/
+COPY migrations/ ./migrations/
 COPY api_app.py .
 COPY .env.example .env
 
