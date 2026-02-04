@@ -22,7 +22,7 @@ services:
     networks:
       - brasileirao-net
 
-  # Redis Cache
+  # Redis Broker
   redis:
     image: redis:7-alpine
     container_name: brasileirao-redis
@@ -38,22 +38,43 @@ services:
       timeout: 3s
       retries: 5
 
-  # Scraper
-  scraper:
+  # API Hub
+  api:
     build: .
-    container_name: brasileirao-scraper
+    container_name: brasileirao-api
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgresql://brasileirao:brasileirao2026@db:5432/brasileirao_2026
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - brasileirao-net
+
+  # Celery Worker (Isolated Scraper)
+  worker:
+    build: .
+    container_name: brasileirao-worker
+    command: [ "celery", "-A", "app.celery_app", "worker", "--loglevel=info", "--concurrency=1" ]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://brasileirao:brasileirao2026@db:5432/brasileirao_2026
+      REDIS_URL: redis://redis:6379/0
     volumes:
       - ./logs:/app/logs
       - ./data:/app/data
     networks:
       - brasileirao-net
-    # Comando para processar rodada específica
-    # command: ["python3", "scripts/main.py", "--rodada", "1"]
 
 volumes:
   postgres_data:

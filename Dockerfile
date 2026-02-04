@@ -22,6 +22,7 @@ RUN mkdir -p logs && chmod 777 logs
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
 
 # Expose port (Render sets PORT env var)
 EXPOSE 8000
