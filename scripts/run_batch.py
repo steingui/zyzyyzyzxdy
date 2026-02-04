@@ -154,32 +154,42 @@ def main():
     parser.add_argument("--year", type=int, required=True, help="Season year (e.g., 2026)")
     args = parser.parse_args()
     
+    run_batch_pipeline(args.league, args.year, args.round)
+
+def run_batch_pipeline(league_slug, year, round_num=None, job_id=None):
+    """
+    Main pipeline logic extracted for direct calling (e.g. from Celery).
+    """
+    import socket
     start_time = datetime.now()
-    job_id = f"{args.league}_{args.year}_r{args.round}_{int(time.time())}"
+    if not job_id:
+        job_id = f"{league_slug}_{year}_r{round_num}_{int(time.time())}"
     
     # Log job start with full context
     log_with_context('info', 'Pipeline started',
         job_id=job_id,
-        league=args.league,
-        year=args.year,
-        round=args.round if args.round else 'auto',
-
+        league=league_slug,
+        year=year,
+        round=round_num if round_num else 'auto',
         hostname=socket.gethostname(),
         timestamp=start_time.isoformat()
     )
     
-    logger.info(f"🚀 Starting scrape: {args.league} {args.year} Round {args.round}")
+    logger.info(f"🚀 Starting scrape: {league_slug} {year} Round {round_num}")
     
+    # Adicionar path raiz ao pythonpath para imports funcionarem dentro das threads
+    sys.path.append(str(Path.cwd()))
+
     # 1. Obter lista de jogos
-    urls = get_matches(force_round=args.round, league_slug=args.league, year=args.year)
+    urls = get_matches(force_round=round_num, league_slug=league_slug, year=year)
     if not urls:
         log_with_context('warning', 'No matches found',
             job_id=job_id,
-            league=args.league,
-            round=args.round
+            league=league_slug,
+            round=round_num
         )
         logger.info("Pipeline encerrado: Nenhum jogo disponível para processar na próxima rodada.")
-        sys.exit(0)
+        return {"status": "completed", "matches_scraped": 0, "total_matches": 0}
         
     # 2. Carregar progresso anterior (JSON local) - Backup Legacy
     results = {
@@ -209,14 +219,10 @@ def main():
     
     logger.info("Verificando estado no banco de dados...")
     for url in urls:
-        # Se já está no JSON local, não precisamos checar banco (otimização leve)
-        # MAS a 'Zero Tolerance' prefere checar banco. 
-        # Vamos checar banco sempre pra garantir atomicidade real.
         if check_match_exists(url):
             logger.info(f"⏭️  Skipping (DB Exists): {url}")
             skipped_count += 1
         elif url in processed_urls_json:
-                # Está no JSON mas não no banco? Estranho, mas vamos reprocessar para garantir insert DB
                 logger.warning(f"⚠️  URL no JSON mas não no DB (Reprocessando): {url}")
                 urls_to_scrape.append(url)
         else:
@@ -226,11 +232,8 @@ def main():
 
     if not urls:
         logger.info("Todos os jogos já foram processados e salvos no banco!")
-        sys.exit(0)
+        return {"status": "completed", "matches_scraped": success_count if 'success_count' in locals() else 0, "total_matches": total_urls if 'total_urls' in locals() else 0}
 
-    # Adicionar path raiz ao pythonpath para imports funcionarem dentro das threads
-    sys.path.append(str(Path.cwd()))
-    
     total_urls = len(urls)
     success_count = 0
     
@@ -248,14 +251,15 @@ def main():
         # Submit tasks
         future_to_url = {
             executor.submit(scrape_match, url, i, total_urls): url
-            for i, url in enumerate(urls, success_count + 1)
+            for i, url in enumerate(urls, 1)
         }
         
         for future in as_completed(future_to_url):
             url = future_to_url[future]
             try:
-                if future.result():
-                    data = future.result()
+                res = future.result()
+                if res:
+                    data = res
                     results["games"].append(data)
                     success_count += 1
                     
@@ -274,7 +278,7 @@ def main():
                     try:
                         normalized_data = normalize_match_data(data)
                         db_start = time.time()
-                        db_success = process_input(normalized_data, league_slug=args.league, year=args.year)
+                        db_success = process_input(normalized_data, league_slug=league_slug, year=year)
                         db_duration = time.time() - db_start
                         
                         if db_success:
@@ -299,11 +303,9 @@ def main():
                         )
                         logger.error(f"❌ Erro crítico ao salvar no banco (continuando batch): {e}")
 
-                    # Salvamento Incremental (JSON Backup)
-                    
                     # Salvamento Incremental (Thread-safe aqui na main thread)
                     try:
-                        logger.info(f"Salvando progresso ({success_count}/{total_urls})...")
+                        # logger.info(f"Salvando progresso ({success_count}/{total_urls})...")
                         with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
                             json.dump(results, f, ensure_ascii=False, indent=2)
                     except Exception as e:
@@ -328,9 +330,9 @@ def main():
     # Final summary log
     log_with_context('info', 'Pipeline completed',
         job_id=job_id,
-        league=args.league,
-        year=args.year,
-        round=args.round,
+        league=league_slug,
+        year=year,
+        round=round_num,
         total_matches=total_urls,
         successful=success_count,
         failed=total_urls - success_count,
@@ -341,6 +343,13 @@ def main():
     logger.info(f"🏁 Processamento concluído em {duration}.")
     logger.info(f"Sucesso: {success_count}/{total_urls}")
     logger.info(f"Dados salvos em: {OUTPUT_FILE.absolute()}")
+    
+    return {
+        "status": "completed",
+        "matches_scraped": success_count,
+        "total_matches": total_urls,
+        "duration_seconds": int(duration.total_seconds())
+    }
 
 if __name__ == "__main__":
     main()
