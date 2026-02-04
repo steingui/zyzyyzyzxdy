@@ -72,6 +72,10 @@ def scrape_worker():
     global worker_running
     logger.info("🚀 Scraping worker thread started (In-Process)")
     
+    # Get the scraper logger to add handlers to it
+    import logging
+    scraper_logger = logging.getLogger('scripts.run_batch')
+    
     while worker_running:
         try:
             # Block until a job is available (timeout 5s)
@@ -85,8 +89,18 @@ def scrape_worker():
             league_slug = job_data['league']
             year = job_data['year']
             round_num = job_data['round']
+            log_file = job_data.get('log_file')
             
             logger.info(f"👷 processing job {job_id} in-process")
+            
+            # Setup dynamic log file handler
+            handler = None
+            if log_file:
+                log_path = Path(log_file)
+                log_path.parent.mkdir(exist_ok=True)
+                handler = logging.FileHandler(log_path)
+                handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+                scraper_logger.addHandler(handler)
             
             # Update status to processing
             job_data['status'] = 'processing'
@@ -95,8 +109,6 @@ def scrape_worker():
             
             # Run the function directly
             try:
-                # Note: We are running inside a thread, ensure flask context if needed
-                # But run_batch_pipeline creates its own app context if necessary
                 result_data = run_batch_pipeline(
                     league_slug=league_slug,
                     year=year,
@@ -116,6 +128,11 @@ def scrape_worker():
                 job_data['status'] = 'failed'
                 job_data['error'] = str(inner_e)
                 job_data['completed_at'] = datetime.utcnow().isoformat() + 'Z'
+            
+            # Cleanup handler
+            if handler:
+                scraper_logger.removeHandler(handler)
+                handler.close()
             
             save_job(job_data)
             logger.info(f"✅ Job {job_id} finished with status {job_data['status']}")
@@ -162,6 +179,11 @@ def start_scrape():
     timestamp = int(time.time())
     job_id = f"scrape_{league_slug}_{year}_{round_num}_{timestamp}"
     
+    # Log file
+    log_dir = Path('logs')
+    log_dir.mkdir(exist_ok=True)
+    log_file = log_dir / f"scrape_{league_slug}_{year}_r{round_num}.log"
+    
     job_data = {
         'job_id': job_id,
         'league': league_slug,
@@ -169,7 +191,8 @@ def start_scrape():
         'year': year,
         'round': round_num,
         'status': 'queued',
-        'enqueued_at': datetime.utcnow().isoformat() + 'Z'
+        'enqueued_at': datetime.utcnow().isoformat() + 'Z',
+        'log_file': str(log_file)
     }
     
     save_job(job_data)
@@ -178,7 +201,8 @@ def start_scrape():
     return jsonify({
         "status": "queued",
         "job_id": job_id,
-        "message": "Job enqueued (In-Process Thread)."
+        "message": "Job enqueued (In-Process Thread).",
+        "log_file": str(log_file)
     }), 202
 
 @scrape_bp.route('/status/<job_id>', methods=['GET'])
