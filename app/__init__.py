@@ -105,6 +105,15 @@ def create_app(config_class=Config):
         app.logger.error(f"Unhandled exception: {error}", exc_info=True)
         return jsonify({"error": "An unexpected error occurred", "status": 500}), 500
 
+    @app.route('/')
+    def index():
+        return jsonify({
+            "name": "BR-Statistics Hub API",
+            "version": "6.0.0",
+            "documentation": "/api/docs",
+            "status": "ready"
+        }), 200
+
     @app.route('/health')
     def health_check():
         return {'status': 'healthy', 'version': '6.0.0'}, 200
