@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Validar se estamos na raiz (se rodar de dentro de scripts/)
+cd "$(dirname "$0")/.."
+
 # ==============================================================================
 # BR-Statistics Hub API - Startup Script
 # ==============================================================================

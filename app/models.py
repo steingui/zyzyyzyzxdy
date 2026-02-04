@@ -1,7 +1,7 @@
 from app import db
 from datetime import datetime
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy import Index
+from sqlalchemy import Index, JSON
 
 # ====================
 # NEW MODELS: MULTI-LEAGUE SUPPORT (STANDARDIZED PT-BR)
@@ -17,7 +17,7 @@ class Liga(db.Model):
     num_times = db.Column(db.Integer, default=20)
     num_rodadas = db.Column(db.Integer, default=38)
     ogol_slug = db.Column(db.String(100))
-    meta_data = db.Column("metadata", JSONB, default={})
+    meta_data = db.Column("metadata", JSON().with_variant(JSONB, "postgresql"), default={})
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
@@ -33,7 +33,7 @@ class Temporada(db.Model):
     data_fim = db.Column(db.Date)
     is_current = db.Column(db.Boolean, default=False)
     ogol_edition_id = db.Column(db.String(50))
-    meta_data = db.Column("metadata", JSONB, default={})
+    meta_data = db.Column("metadata", JSON().with_variant(JSONB, "postgresql"), default={})
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
@@ -59,7 +59,7 @@ class TimeTemporada(db.Model):
     derrotas = db.Column(db.Integer, default=0)
     gols_pro = db.Column(db.Integer, default=0)
     gols_contra = db.Column(db.Integer, default=0)
-    meta_data = db.Column("metadata", JSONB, default={})
+    meta_data = db.Column("metadata", JSON().with_variant(JSONB, "postgresql"), default={})
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -98,7 +98,7 @@ class Jogador(db.Model):
     nacionalidade = db.Column(db.String(50))
     data_nascimento = db.Column(db.Date)
     id_fonte = db.Column(db.String(100))
-    meta_data = db.Column("metadata", JSONB, default={})
+    meta_data = db.Column("metadata", JSON().with_variant(JSONB, "postgresql"), default={})
     
     time_atual = db.relationship('Time', backref='jogadores')
 
@@ -134,7 +134,7 @@ class Partida(db.Model):
     publico = db.Column(db.Integer)
     status = db.Column(db.String(20), default='scheduled')
     url_fonte = db.Column(db.String(255), unique=True)
-    meta_data = db.Column("metadata", JSONB, default={})
+    meta_data = db.Column("metadata", JSON().with_variant(JSONB, "postgresql"), default={})
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -204,7 +204,7 @@ class EstatisticaPartida(db.Model):
     duelos_ganhos_fora = db.Column(db.Integer)
     duelos_aereos_ganhos_casa = db.Column(db.Integer)
     duelos_aereos_ganhos_fora = db.Column(db.Integer)
-    meta_data = db.Column("metadata", JSONB, default={})
+    meta_data = db.Column("metadata", JSON().with_variant(JSONB, "postgresql"), default={})
     updated_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     partida = db.relationship('Partida', backref=db.backref('estatisticas', uselist=False))
@@ -245,7 +245,7 @@ class Escalacao(db.Model):
     titular = db.Column(db.Boolean, default=False)
     numero_camisa = db.Column(db.String(10))
     nota = db.Column(db.Float)
-    stats = db.Column(JSONB, default={})
+    stats = db.Column(JSON().with_variant(JSONB, "postgresql"), default={})
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     partida = db.relationship('Partida', backref='escalacoes')

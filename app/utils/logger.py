@@ -48,10 +48,10 @@ class ToonFormatter(logging.Formatter):
         
         # Encode to TOON
         try:
-            return toon.encode(record_dict)
+            return toon.encode(record_dict) + '\n'
         except Exception:
             # Fallback if encoding fails
-            return str(record_dict)
+            return str(record_dict) + '\n'
 
     def _economize_tokens(self, data):
         """

@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Validar se estamos na raiz
+cd "$(dirname "$0")/.."
+
 # run_pipeline.sh
 # Script para orquestrar a execução do scraper e carga no banco de dados.
 # Garante ambiente virtual ativo e verifica sucesso da carga.
