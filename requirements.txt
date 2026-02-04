@@ -48,3 +48,4 @@ asyncpg==0.29.0
 asgiref==3.11.0
 python-json-logger==4.0.0
 python-toon
+gunicorn==21.2.0

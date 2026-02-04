@@ -1,25 +1,29 @@
-# Dockerfile para o scraper do Brasileirão 2026
+# Dockerfile for Render Deployment
 FROM mcr.microsoft.com/playwright/python:v1.40.0-jammy
 
 WORKDIR /app
 
-# Copiar requirements e instalar dependências
+# Install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Instalar navegadores Playwright
+# Install Playwright browsers (Chromium only to save size)
 RUN playwright install chromium
 
-# Copiar código
+# Copy application code
+COPY app/ ./app/
 COPY scripts/ ./scripts/
-COPY data/ ./data/
+COPY api_app.py .
+COPY .env.example .env
 
-# Criar diretório de logs
-RUN mkdir -p logs
+# Create logs directory
+RUN mkdir -p logs && chmod 777 logs
 
-# Variáveis de ambiente
+# Environment variables
 ENV PYTHONUNBUFFERED=1
-ENV DATABASE_URL=""
 
-# Comando padrão
-CMD ["python3", "scripts/main.py"]
+# Expose port (Render sets PORT env var)
+EXPOSE 8000
+
+# Start Gunicorn
+CMD ["gunicorn", "api_app:app", "--bind", "0.0.0.0:8000", "--timeout", "120", "--workers", "2"]
