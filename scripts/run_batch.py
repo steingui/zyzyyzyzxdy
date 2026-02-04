@@ -19,12 +19,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Imports locais (assumindo execução da raiz ou pythonpath configurado)
 try:
+    from scripts.config import OGOL_BASE_URL
     from scripts.utils.normalization import normalize_match_data
     from scripts.db_importer import process_input
     from scripts.utils.state import get_last_processed_round, check_match_exists
 except ImportError:
     # Fallback se rodar de dentro de scripts/
     sys.path.append(str(Path(__file__).parent.parent))
+    from scripts.config import OGOL_BASE_URL
     from scripts.utils.normalization import normalize_match_data
     from scripts.db_importer import process_input
     from scripts.utils.state import get_last_processed_round, check_match_exists
@@ -74,7 +76,7 @@ def log_with_context(level, message, **context):
     log_method = getattr(logger, level.lower(), logger.info)
     log_method(message, extra=extra_record.__dict__)
 
-def get_matches(force_round: int = None, league_slug: str = "brasileirao", year: int = 2026):
+def get_matches(league_slug: str, year: int, force_round: int = None):
     """Calcula próxima rodada (ou usa forçada) e chama o crawler."""
     if force_round:
         next_round = force_round
@@ -124,6 +126,15 @@ def scrape_match(url, index, total):
         return data
 
     except Exception as e:
+        # Import exception locally to avoid top-level import issues if not in pythonpath
+        try:
+             from scripts.exceptions import InvalidDOMError
+             if isinstance(e, InvalidDOMError):
+                 logger.error(f"🚫 DOM INVÁLIDO (Anti-Garbage): {url} - {e}")
+                 return None
+        except ImportError:
+             pass
+
         logger.error(f"❌ Falha fatal ao processar {url}: {e}")
         return None
 
@@ -133,8 +144,8 @@ def main():
     
     parser = argparse.ArgumentParser(description="Batch Scraper Runner")
     parser.add_argument("round", nargs="?", type=int, help="Forçar execução de uma rodada específica (ignora estado do banco)")
-    parser.add_argument("--league", default="brasileirao", help="League slug (default: brasileirao)")
-    parser.add_argument("--year", type=int, default=2026, help="Season year (default: 2026)")
+    parser.add_argument("--league", required=True, help="League slug (e.g., brasileirao)")
+    parser.add_argument("--year", type=int, required=True, help="Season year (e.g., 2026)")
     args = parser.parse_args()
     
     start_time = datetime.now()

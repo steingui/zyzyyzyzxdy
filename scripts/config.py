@@ -16,6 +16,11 @@ JS_INITIAL_WAIT = 3000  # Tempo para JS inicial carregar
 STABILIZATION_WAIT = 1000  # Tempo para página estabilizar
 
 # =============================================================================
+# PROJECT DEFAULTS
+# =============================================================================
+OGOL_BASE_URL = "https://www.ogol.com.br"
+
+# =============================================================================
 # BROWSER CONFIG
 # =============================================================================
 # User-Agent moderno (Chrome 122 on Windows 10) para parecer usuário real

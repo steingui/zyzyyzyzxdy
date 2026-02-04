@@ -27,6 +27,7 @@ from datetime import datetime
 from flask import Blueprint, request, jsonify, current_app
 from app.models import db, Liga
 
+
 scrape_bp = Blueprint('scrape', __name__, url_prefix='/api/scrape')
 
 # Logging
@@ -228,10 +229,16 @@ def start_scrape():
     data = request.get_json()
     
     # Validate input
-    league_slug = data.get('league', 'brasileirao')
-    year = data.get('year', 2026)
+    league_slug = data.get('league')
+    year = data.get('year')
     round_num = data.get('round')
     sync_mode = data.get('sync', False)
+    
+    if not league_slug:
+        return jsonify({"error": "league is required"}), 400
+    
+    if not year:
+        return jsonify({"error": "year is required"}), 400
     
     if not round_num:
         return jsonify({"error": "round is required"}), 400

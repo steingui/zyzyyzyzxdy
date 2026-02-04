@@ -52,6 +52,8 @@ from scripts.extractors import (
 from scripts.utils import remove_ads, scroll_to_top
 from scripts.utils.merger import merge_player_data
 from scripts.utils.proxy import ProxyManager  # [NEW]
+from scripts.exceptions import InvalidDOMError
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
 
 # Garantir que diretório de logs existe
 LOG_DIR = Path(__file__).parent.parent / 'logs'
@@ -77,15 +79,66 @@ class OgolScraper:
         """
         self.headless = headless
         self.detailed = detailed
+        self.strict_mode = True # Always strict by default for now
         self.data: Dict[str, Any] = {}
         self.proxy_manager = ProxyManager()  # [NEW] Initialize ProxyManager
     
-    from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
+    def _validate_page_structure(self, page):
+        """
+        Validates if the page has the expected DOM structure.
+        Raises InvalidDOMError if critical elements are missing.
+        """
+        try:
+            # 1. Check for Match Header or Game Report (Basic Identity)
+            has_identity = page.evaluate('''() => {
+                return !!(
+                    document.querySelector('.zz-container #game_report') || 
+                    document.querySelector('.match-header') ||
+                    document.querySelector('.match-header-team')
+                );
+            }''')
+            
+            if not has_identity:
+                raise InvalidDOMError("Page missing match identity (header/game_report)")
+
+            # 2. Check for Score (Critical)
+            has_score = page.evaluate('''() => {
+                return !!document.querySelector('.match-header-vs .result') || 
+                       !!document.querySelector('.match-header-vs a');
+            }''')
+            
+            if not has_score:
+                 # Check if it's a future match (no score yet)? 
+                 # For now, we assume we only scrape past matches or live matches with score.
+                 # But if we are scraping 'fixtures', this might fail.
+                 # Given the user wants "100% efficiency" to avoid garbage, we enforce score presence.
+                 raise InvalidDOMError("Page missing score element")
+
+            # 3. Check for Stats Containment (Critical context for statistics)
+            if self.strict_mode:
+                has_stats_container = page.evaluate('''() => {
+                    // Check for either the new layout container or old graph bars
+                    return !!(
+                        document.querySelector('.zz-container table') || 
+                        document.querySelector('.graph-bar')
+                    );
+                }''')
+                
+                if not has_stats_container:
+                     raise InvalidDOMError("Page missing statistics container (table or graph-bar)")
+
+        except Exception as e:
+            if isinstance(e, InvalidDOMError):
+                raise e
+            # If evaluate fails (page closed?), wrap it
+            raise InvalidDOMError(f"DOM Validation failed unexpectedly: {e}")
 
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_exception_type((PlaywrightTimeout, Exception)),
+        retry=retry_if_exception_type((PlaywrightTimeout, Exception)), # Will retry InvalidDOMError too? Maybe not desired?
+        # Actually, if DOM is wrong, retrying might fix it if it was a partial load. 
+        # So yes, retry InvalidDOMError is acceptable.
         before_sleep=before_sleep_log(logger, logging.WARNING)
     )
     def _execute_scrape_logic(self, page, url: str):
@@ -96,6 +149,17 @@ class OgolScraper:
         
         remove_ads(page)
         
+        # Validation Step
+        try:
+            self._validate_page_structure(page)
+        except InvalidDOMError as e:
+            logger.warning(f"DOM Validation failed on first load: {e}. Attempting scrolls...")
+            # Maybe it needs scrolling to load? Continue to scrolls logic and validate again?
+            # Or fail fast?
+            # User wants "100% efficient", so maybe fail explicitly?
+            # But let's try the scrolls -> validate pattern to be robust.
+            pass
+
         # Scroll agressivo para forçar lazy loading
         for scroll in INITIAL_SCROLL_POSITIONS:
             page.evaluate(f'window.scrollTo(0, {scroll})')
@@ -104,6 +168,9 @@ class OgolScraper:
         
         # Voltar ao topo e esperar estabilizar
         scroll_to_top(page, STABILIZATION_WAIT)
+        
+        # Final Strong Validation
+        self._validate_page_structure(page)
         
         # Tentar esperar por elementos específicos (flexível)
         try:

@@ -27,6 +27,7 @@ load_dotenv()
 # Configuração de Logs (RFC 005)
 sys.path.append(os.getcwd())
 from app.utils.logger import get_logger
+
 logger = get_logger(__name__)
 
 
@@ -37,7 +38,7 @@ def get_or_create_season(cursor, league_slug: str, year: int) -> int:
     Args:
         cursor: database cursor
         league_slug: ogol.com.br league slug (e.g., 'brasileirao', 'premier-league')
-        year: season year (e.g., 2026)
+        year: season year (e.g., 2026, defaults to config)
     
     Returns:
         season_id
@@ -385,7 +386,7 @@ def insert_escalacoes(cursor, partida_id: int, escalacao: dict, time_id: int):
             logger.info(f"✅ Escalação inserida: {player.get('nome')} (Partida {partida_id}, Rating: {nota})")
 
 
-def process_input(data: dict, league_slug: str = "brasileirao", year: int = 2026) -> bool:
+def process_input(data: dict, league_slug: str, year: int) -> bool:
     """
     Processa o JSON de entrada e persiste no banco.
     Regra S02: COMMIT apenas após validação completa.
@@ -498,8 +499,14 @@ def main():
         logger.error(f"JSON inválido: {e}")
         sys.exit(1)
     
+    import argparse
+    parser = argparse.ArgumentParser(description="DB Importer")
+    parser.add_argument("--league", required=True, help="League slug")
+    parser.add_argument("--year", type=int, required=True, help="Season year")
+    args = parser.parse_args()
+
     # Processar e salvar
-    success = process_input(data)
+    success = process_input(data, league_slug=args.league, year=args.year)
     sys.exit(0 if success else 1)
 
 
