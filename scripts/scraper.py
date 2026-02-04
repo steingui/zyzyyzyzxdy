@@ -51,9 +51,11 @@ from scripts.extractors import (
 )
 from scripts.utils import remove_ads, scroll_to_top
 from scripts.utils.merger import merge_player_data
-from scripts.utils.proxy import ProxyManager  # [NEW]
+from scripts.utils.proxy import ProxyManager
+from scripts.utils.throttle import AdaptiveThrottle
 from scripts.exceptions import InvalidDOMError
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
+import time
 
 # Garantir que diretório de logs existe
 LOG_DIR = Path(__file__).parent.parent / 'logs'
@@ -69,19 +71,21 @@ logger = get_logger(__name__)
 class OgolScraper:
     """Scraper para ogol.com.br - extrai estatísticas de partidas do Brasileirão."""
     
-    def __init__(self, headless: bool = True, detailed: bool = False) -> None:
+    def __init__(self, headless: bool = True, detailed: bool = False, throttle: AdaptiveThrottle = None) -> None:
         """
         Inicializa o scraper.
         
         Args:
             headless: Se True, roda o browser sem interface gráfica
             detailed: Se True, extrai stats detalhadas de cada jogador (mais lento)
+            throttle: Instância opcional de AdaptiveThrottle (compartilhada)
         """
         self.headless = headless
         self.detailed = detailed
         self.strict_mode = True # Always strict by default for now
         self.data: Dict[str, Any] = {}
-        self.proxy_manager = ProxyManager()  # [NEW] Initialize ProxyManager
+        self.proxy_manager = ProxyManager()
+        self.throttle = throttle or AdaptiveThrottle()
     
     def _validate_page_structure(self, page):
         """
@@ -144,7 +148,13 @@ class OgolScraper:
     def _execute_scrape_logic(self, page, url: str):
         """Core logic with retry support"""
         # Carregar página e aguardar conteúdo inicial
+        start_time = time.time()
         page.goto(url, wait_until='domcontentloaded', timeout=NAVIGATION_TIMEOUT)
+        
+        # Adaptive Throttle: sleep proportional to server response time
+        response_time = time.time() - start_time
+        self.throttle.wait(response_time)
+
         page.wait_for_timeout(JS_INITIAL_WAIT)
         
         remove_ads(page)

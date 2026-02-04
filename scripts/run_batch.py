@@ -23,6 +23,7 @@ try:
     from scripts.utils.normalization import normalize_match_data
     from scripts.db_importer import process_input
     from scripts.utils.state import get_last_processed_round, check_match_exists
+    from scripts.utils.throttle import AdaptiveThrottle
 except ImportError:
     # Fallback se rodar de dentro de scripts/
     sys.path.append(str(Path(__file__).parent.parent))
@@ -30,12 +31,16 @@ except ImportError:
     from scripts.utils.normalization import normalize_match_data
     from scripts.db_importer import process_input
     from scripts.utils.state import get_last_processed_round, check_match_exists
+    from scripts.utils.throttle import AdaptiveThrottle
 
 # Configuração
 SCRIPTS_DIR = Path(__file__).parent
 OUTPUT_FILE = Path("rodada_atual_full.json")
 LOG_DIR = Path("logs")
 LOG_DIR.mkdir(exist_ok=True)
+
+# Shared Resources
+global_throttle = AdaptiveThrottle()
 
 # Structured logging setup
 class StructuredFormatter(logging.Formatter):
@@ -120,7 +125,8 @@ def scrape_match(url, index, total):
         from scripts.scraper import OgolScraper
         
         # Cria nova instância para cada thread
-        scraper = OgolScraper(headless=True, detailed=True)
+        # Usamos o global_throttle para compartilhar o rate limiting entre threads
+        scraper = OgolScraper(headless=True, detailed=True, throttle=global_throttle)
         # O método scrape agora possui @retry via tenacity
         data = scraper.scrape(url)
         return data
