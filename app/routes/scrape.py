@@ -9,18 +9,16 @@ Queue-based system (Redis):
 - Persistent across restarts
 """
 
-import subprocess
 import os
 import json
 import time
-import signal
 import threading
 import redis
-import psutil
 from pathlib import Path
 from datetime import datetime
 from flask import Blueprint, request, jsonify, current_app
 from app.models import db, Liga
+from scripts.run_batch import run_batch_pipeline
 
 scrape_bp = Blueprint('scrape', __name__, url_prefix='/api/scrape')
 
@@ -66,20 +64,13 @@ def load_jobs():
         logger.error("Redis error in load_jobs", extra={"error": str(e)})
         return {}
 
-def is_process_running(pid):
-    """Check if process with PID is still running"""
-    try:
-        return psutil.pid_exists(pid)
-    except:
-        return False
-
 def scrape_worker():
     """
     Background worker that consumes a Redis list queue.
-    Runs one job at a time.
+    Runs one job at a time in-process.
     """
     global worker_running
-    logger.info("🚀 Scraping worker thread started")
+    logger.info("🚀 Scraping worker thread started (In-Process)")
     
     while worker_running:
         try:
@@ -91,38 +82,43 @@ def scrape_worker():
             _, job_json = result
             job_data = json.loads(job_json)
             job_id = job_data['job_id']
-            cmd = job_data['cmd']
-            log_file = job_data['log_file']
+            league_slug = job_data['league']
+            year = job_data['year']
+            round_num = job_data['round']
             
-            logger.info(f"👷 Processing job {job_id}: {' '.join(cmd)}")
+            logger.info(f"👷 processing job {job_id} in-process")
             
             # Update status to processing
             job_data['status'] = 'processing'
             job_data['processing_started_at'] = datetime.utcnow().isoformat() + 'Z'
             save_job(job_data)
             
-            # Run the process
-            with open(log_file, 'w') as f:
-                process = subprocess.Popen(
-                    cmd,
-                    stdout=f,
-                    stderr=subprocess.STDOUT,
-                    preexec_fn=os.setsid  # Create process group for easier cancellation
+            # Run the function directly
+            try:
+                # Note: We are running inside a thread, ensure flask context if needed
+                # But run_batch_pipeline creates its own app context if necessary
+                result_data = run_batch_pipeline(
+                    league_slug=league_slug,
+                    year=year,
+                    round_num=round_num,
+                    job_id=job_id
                 )
                 
-                job_data['pid'] = process.pid
-                save_job(job_data)
+                # Update completion status
+                job_data['status'] = result_data.get('status', 'completed')
+                job_data['matches_scraped'] = result_data.get('matches_scraped', 0)
+                job_data['total_matches'] = result_data.get('total_matches', 0)
+                job_data['duration_seconds'] = result_data.get('duration_seconds', 0)
+                job_data['completed_at'] = datetime.utcnow().isoformat() + 'Z'
                 
-                # Wait for completion
-                exit_code = process.wait()
+            except Exception as inner_e:
+                logger.error(f"❌ Scraper function failed: {inner_e}", exc_info=True)
+                job_data['status'] = 'failed'
+                job_data['error'] = str(inner_e)
+                job_data['completed_at'] = datetime.utcnow().isoformat() + 'Z'
             
-            # Update completion status
-            job_data['status'] = 'completed' if exit_code == 0 else 'failed'
-            job_data['completed_at'] = datetime.utcnow().isoformat() + 'Z'
-            job_data['exit_code'] = exit_code
             save_job(job_data)
-            
-            logger.info(f"✅ Job {job_id} finished with code {exit_code}")
+            logger.info(f"✅ Job {job_id} finished with status {job_data['status']}")
             
         except redis.ConnectionError:
             logger.error("❌ Redis connection lost in worker. Retrying...")
@@ -147,7 +143,7 @@ start_worker()
 
 @scrape_bp.route('', methods=['POST'])
 def start_scrape():
-    """Start a scraping job (Legacy Threading)"""
+    """Start a scraping job (In-Process Threading)"""
     data = request.get_json()
     
     league_slug = data.get('league')
@@ -166,14 +162,6 @@ def start_scrape():
     timestamp = int(time.time())
     job_id = f"scrape_{league_slug}_{year}_{round_num}_{timestamp}"
     
-    # Log file
-    log_dir = Path('logs')
-    log_dir.mkdir(exist_ok=True)
-    log_file = log_dir / f"scrape_{league_slug}_{year}_r{round_num}.log"
-    
-    # Build command
-    cmd = ["python3", "scripts/run_batch.py", str(round_num), "--league", league_slug, "--year", str(year)]
-    
     job_data = {
         'job_id': job_id,
         'league': league_slug,
@@ -181,9 +169,7 @@ def start_scrape():
         'year': year,
         'round': round_num,
         'status': 'queued',
-        'enqueued_at': datetime.utcnow().isoformat() + 'Z',
-        'log_file': str(log_file),
-        'cmd': cmd
+        'enqueued_at': datetime.utcnow().isoformat() + 'Z'
     }
     
     save_job(job_data)
@@ -192,8 +178,7 @@ def start_scrape():
     return jsonify({
         "status": "queued",
         "job_id": job_id,
-        "message": "Job enqueued (Local Threating).",
-        "log_file": str(log_file)
+        "message": "Job enqueued (In-Process Thread)."
     }), 202
 
 @scrape_bp.route('/status/<job_id>', methods=['GET'])
@@ -211,22 +196,8 @@ def list_jobs():
 
 @scrape_bp.route('/cancel/<job_id>', methods=['POST'])
 def cancel_job(job_id):
-    job = get_job(job_id)
-    if not job:
-        return jsonify({"error": "Job not found"}), 404
-    
-    pid = job.get('pid')
-    if pid and is_process_running(pid):
-        try:
-            os.killpg(os.getpgid(pid), signal.SIGTERM)
-            logger.info(f"Cancelled job {job_id} (PID {pid})")
-            job['status'] = 'cancelled'
-            save_job(job)
-            return jsonify({"status": "cancelled", "job_id": job_id})
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
-            
-    return jsonify({"error": "Job not running"}), 400
+    """Note: Termination of thread-based jobs is not supported safely in Python."""
+    return jsonify({"error": "Cancellation not supported for in-process jobs"}), 400
 
 @scrape_bp.route('/queue', methods=['GET'])
 def get_queue_status():
