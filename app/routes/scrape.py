@@ -14,6 +14,7 @@ import json
 import time
 import threading
 import redis
+import logging
 from pathlib import Path
 from datetime import datetime
 from flask import Blueprint, request, jsonify, current_app
@@ -33,6 +34,10 @@ redis_client = redis.from_url(REDIS_URL, decode_responses=True)
 # Redis Keys
 KEY_QUEUE = "scrape:queue"
 KEY_JOBS = "scrape:jobs"
+
+# Constants
+MAX_RETRIES = 3
+RETRY_DELAY = 10 # Seconds
 
 # Worker controls (In-process thread)
 worker_thread = None
@@ -64,21 +69,51 @@ def load_jobs():
         logger.error("Redis error in load_jobs", extra={"error": str(e)})
         return {}
 
+def recover_stuck_jobs():
+    """
+    On startup, find jobs that were in 'processing' or 'queued' but 
+    never finished (app crash) and put them back in the queue.
+    """
+    logger.info("🔍 Checking for stuck jobs...")
+    jobs = load_jobs()
+    recovered_count = 0
+    
+    # Get current queue content to avoid duplicates
+    try:
+        current_queue = redis_client.lrange(KEY_QUEUE, 0, -1)
+        enqueued_job_ids = {json.loads(j)['job_id'] for j in current_queue}
+    except:
+        enqueued_job_ids = set()
+
+    for job_id, job_data in jobs.items():
+        status = job_data.get('status')
+        if status in ['processing', 'queued']:
+            if job_id not in enqueued_job_ids:
+                logger.warning(f"🔄 Recovering stuck job: {job_id} (Status: {status})")
+                job_data['status'] = 'queued'
+                job_data['recovered_at'] = datetime.utcnow().isoformat() + 'Z'
+                save_job(job_data)
+                redis_client.lpush(KEY_QUEUE, json.dumps(job_data))
+                recovered_count += 1
+    
+    if recovered_count > 0:
+        logger.info(f"✅ Recovered {recovered_count} stuck jobs.")
+    else:
+        logger.info("✨ No stuck jobs found.")
+
 def scrape_worker():
     """
     Background worker that consumes a Redis list queue.
-    Runs one job at a time in-process.
+    Runs one job at a time in-process with Retry logic.
     """
     global worker_running
-    logger.info("🚀 Scraping worker thread started (In-Process)")
+    logger.info("🚀 Scraping worker thread started (In-Process Reliable)")
     
-    # Get the scraper logger to add handlers to it
-    import logging
     scraper_logger = logging.getLogger('scripts.run_batch')
     
     while worker_running:
         try:
-            # Block until a job is available (timeout 5s)
+            # Block until a job is available
             result = redis_client.blpop(KEY_QUEUE, timeout=5)
             if not result:
                 continue
@@ -90,8 +125,9 @@ def scrape_worker():
             year = job_data['year']
             round_num = job_data['round']
             log_file = job_data.get('log_file')
+            retry_count = job_data.get('retry_count', 0)
             
-            logger.info(f"👷 processing job {job_id} in-process")
+            logger.info(f"👷 processing job {job_id} (Attempt {retry_count + 1})")
             
             # Setup dynamic log file handler
             handler = None
@@ -124,10 +160,24 @@ def scrape_worker():
                 job_data['completed_at'] = datetime.utcnow().isoformat() + 'Z'
                 
             except Exception as inner_e:
-                logger.error(f"❌ Scraper function failed: {inner_e}", exc_info=True)
-                job_data['status'] = 'failed'
-                job_data['error'] = str(inner_e)
-                job_data['completed_at'] = datetime.utcnow().isoformat() + 'Z'
+                logger.error(f"❌ Scraper function failed for {job_id}: {inner_e}")
+                
+                if retry_count < MAX_RETRIES:
+                    logger.warning(f"🔄 Retrying job {job_id} in {RETRY_DELAY}s... ({retry_count + 1}/{MAX_RETRIES})")
+                    job_data['status'] = 'queued'
+                    job_data['retry_count'] = retry_count + 1
+                    job_data['last_error'] = str(inner_e)
+                    save_job(job_data)
+                    
+                    # Backoff sleep before re-queueing to avoid infinite rapid failure loops
+                    time.sleep(RETRY_DELAY)
+                    redis_client.rpush(KEY_QUEUE, json.dumps(job_data))
+                    continue # Skip the rest of loop to not close handler yet? No, better close and reopen.
+                else:
+                    logger.error(f"💀 Job {job_id} failed after {MAX_RETRIES} retries.")
+                    job_data['status'] = 'failed'
+                    job_data['error'] = str(inner_e)
+                    job_data['completed_at'] = datetime.utcnow().isoformat() + 'Z'
             
             # Cleanup handler
             if handler:
@@ -141,7 +191,7 @@ def scrape_worker():
             logger.error("❌ Redis connection lost in worker. Retrying...")
             time.sleep(5)
         except Exception as e:
-            logger.error("❌ Worker error", extra={"error": str(e)}, exc_info=True)
+            logger.error("❌ Worker loop error", extra={"error": str(e)}, exc_info=True)
     
     logger.info("🛑 Scraping worker thread stopped")
 
@@ -150,6 +200,13 @@ def start_worker():
     global worker_thread, worker_running
     
     if worker_thread is None or not worker_thread.is_alive():
+        # 1. Recovery first
+        try:
+            recover_stuck_jobs()
+        except Exception as e:
+            logger.error(f"Failed to recover stuck jobs: {e}")
+
+        # 2. Start thread
         worker_running = True
         worker_thread = threading.Thread(target=scrape_worker, daemon=True, name="ScrapeWorker")
         worker_thread.start()
@@ -160,7 +217,7 @@ start_worker()
 
 @scrape_bp.route('', methods=['POST'])
 def start_scrape():
-    """Start a scraping job (In-Process Threading)"""
+    """Start a scraping job (In-Process Reliable)"""
     data = request.get_json()
     
     league_slug = data.get('league')
@@ -192,7 +249,8 @@ def start_scrape():
         'round': round_num,
         'status': 'queued',
         'enqueued_at': datetime.utcnow().isoformat() + 'Z',
-        'log_file': str(log_file)
+        'log_file': str(log_file),
+        'retry_count': 0
     }
     
     save_job(job_data)
@@ -201,7 +259,7 @@ def start_scrape():
     return jsonify({
         "status": "queued",
         "job_id": job_id,
-        "message": "Job enqueued (In-Process Thread).",
+        "message": "Job enqueued (Reliable In-Process).",
         "log_file": str(log_file)
     }), 202
 
@@ -215,7 +273,8 @@ def get_status(job_id):
 @scrape_bp.route('/jobs', methods=['GET'])
 def list_jobs():
     jobs = load_jobs()
-    job_list = sorted(jobs.values(), key=lambda x: x.get('enqueued_at', ''), reverse=True)
+    job_list = list(jobs.values())
+    job_list.sort(key=lambda x: x.get('enqueued_at', ''), reverse=True)
     return jsonify({"jobs": job_list, "total": len(job_list)})
 
 @scrape_bp.route('/cancel/<job_id>', methods=['POST'])
@@ -225,11 +284,14 @@ def cancel_job(job_id):
 
 @scrape_bp.route('/queue', methods=['GET'])
 def get_queue_status():
-    q_size = redis_client.llen(KEY_QUEUE)
+    try:
+        q_size = redis_client.llen(KEY_QUEUE)
+    except:
+        q_size = 0
     return jsonify({
         "queue_size": q_size,
         "worker_running": worker_running,
-        "worker_alive": worker_thread.is_alive() if worker_thread else False
+        "worker_active": worker_thread.is_alive() if worker_thread else False
     })
 
 @scrape_bp.route('/flush', methods=['DELETE'])
