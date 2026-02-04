@@ -55,7 +55,12 @@ try:
         )
     # Ping to check connection
     redis_client.ping()
-    logger.info(f"✅ Redis connected at {REDIS_HOST}:{REDIS_PORT}")
+    if REDIS_URL:
+        # Hide password in logs if present
+        safe_url = REDIS_URL.split('@')[-1] if '@' in REDIS_URL else REDIS_URL
+        logger.info(f"✅ Redis connected via REDIS_URL ({safe_url})")
+    else:
+        logger.info(f"✅ Redis connected at {REDIS_HOST}:{REDIS_PORT}")
 except Exception as e:
     logger.error(f"❌ Failed to connect to Redis: {e}")
     # We continue, but worker will fail loop if not connected
