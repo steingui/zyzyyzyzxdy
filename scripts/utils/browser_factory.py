@@ -122,20 +122,87 @@ def _is_cloudflare_challenge(page: Page) -> bool:
 
 
 def simulate_human_side_effects(page: Page):
-    """Perform random mouse movements and scrolls to look human."""
+    """Perform random mouse movements, scrolls, and clicks to look human."""
     import random
     try:
         # Random mouse move
         x = random.randint(100, 800)
         y = random.randint(100, 600)
-        page.mouse.move(x, y, steps=5)
+        logger.debug(f"Human Sim: Moving mouse to ({x}, {y})")
+        page.mouse.move(x, y, steps=10)
         
         # Occasional scroll
-        if random.random() < 0.3:
-            page.mouse.wheel(0, random.randint(100, 500))
+        if random.random() < 0.4:
+            dy = random.randint(100, 500)
+            logger.debug(f"Human Sim: Scrolling by {dy}")
+            page.mouse.wheel(0, dy)
+        
+        # Random small pauses
+        if random.random() < 0.1:
+            delay = random.uniform(0.1, 0.5)
+            logger.debug(f"Human Sim: Pausing for {delay:.2f}s")
+            time.sleep(delay)
             
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Human Sim Error: {e}")
+
+
+def attempt_click_cf_checkbox(page: Page):
+    """
+    Aggressively search for and click the Cloudflare/Turnstile 'Verify' checkbox.
+    Checks main page, iframes, and shadow roots.
+    """
+    try:
+        # Common selectors for the checkbox
+        selectors = [
+            "input[type='checkbox']",
+            ".ctp-checkbox-label",
+            "#turnstile-wrapper iframe",
+            "iframe[src*='cloudflare']",
+            "iframe[src*='turnstile']",
+            ".big-button",
+            "div.cb-b", # sometimes used
+            "#challenge-stage input"
+        ]
+        
+        frames = page.frames
+        logger.debug(f"Active Solver: Checking {len(frames)} frames for CF/Turnstile widgets...")
+
+        # 1. Check main page
+        for sel in selectors:
+            try:
+                # If it's an iframe, we might need to verify inside it
+                if "iframe" in sel:
+                    for i, frame in enumerate(frames):
+                        if "cloudflare" in frame.url or "turnstile" in frame.url:
+                            logger.debug(f"Active Solver: Found potential CF frame [{i}]: {frame.url}")
+                            # Try clicking body or checkbox inside frame
+                            try:
+                                checkbox = frame.locator("input[type='checkbox']").first
+                                if checkbox.is_visible():
+                                    logger.info(f"Clicking CF checkbox in iframe: {frame.url}")
+                                    checkbox.click()
+                                    return
+                                
+                                # Sometimes just clicking the body of the challenge frame works
+                                logger.debug(f"Active Solver: Clicking body of CF frame [{i}]")
+                                frame.locator("body").click(timeout=500)
+                                return
+                            except Exception as frame_err:
+                                logger.debug(f"Active Solver: Failed interaction in frame [{i}]: {frame_err}")
+                else:
+                    # Regular element on main page
+                    # logger.debug(f"Active Solver: Checking selector '{sel}' on main page...")
+                    element = page.locator(sel).first
+                    if element.is_visible():
+                        logger.info(f"Active Solver: Clicking found element '{sel}'")
+                        element.click()
+                        return
+            except:
+                continue
+
+    except Exception as e:
+        logger.debug(f"Error trying to click CF checkbox: {e}")
 
 
 def wait_for_cloudflare(page: Page, timeout: int = 30, poll_interval: float = 2.0) -> bool:
@@ -157,6 +224,9 @@ def wait_for_cloudflare(page: Page, timeout: int = 30, poll_interval: float = 2.
         
         # ACT LIKE A HUMAN while waiting
         simulate_human_side_effects(page)
+        
+        # ACTIVELY TRY TO SOLVE IT
+        attempt_click_cf_checkbox(page)
         
         time.sleep(poll_interval)
         
