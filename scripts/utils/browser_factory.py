@@ -73,8 +73,11 @@ def _is_cloudflare_challenge(page: Page) -> bool:
     """Check if the current page is a Cloudflare challenge."""
     try:
         title = page.title().lower()
-        if any(ind in title for ind in _CF_INDICATORS[:2]):
+        # Check all indicators against title
+        if any(ind in title for ind in _CF_INDICATORS):
             return True
+        
+        # Check body text
         body_text = page.evaluate(
             "document.body?.innerText?.substring(0, 500)?.toLowerCase() || ''"
         )
@@ -123,5 +126,10 @@ def navigate_with_cf_wait(page: Page, url: str, timeout: int = 60000) -> None:
     Raises InvalidDOMError if challenge does not clear.
     """
     page.goto(url, wait_until="domcontentloaded", timeout=timeout)
-    if not wait_for_cloudflare(page, timeout=30):
+    # Increased timeout for production (Render can be slow)
+    if not wait_for_cloudflare(page, timeout=60):
+        # Final check: maybe it resolved but page title is weird?
+        # If we have the fixture table, we are good.
+        if page.locator("#fixture_games").count() > 0:
+            return
         raise InvalidDOMError(f"Cloudflare challenge did not resolve for {url}")
