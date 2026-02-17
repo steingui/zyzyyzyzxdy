@@ -34,13 +34,10 @@ from scripts.config import (
     SCROLL_DELAY,
     JS_INITIAL_WAIT,
     STABILIZATION_WAIT,
-    USER_AGENT,
-    EXTRA_HEADERS,
-    VIEWPORT,
-    BROWSER_ARGS,
     INITIAL_SCROLL_POSITIONS,
     LINEUP_SCROLL_RANGE,
 )
+from scripts.utils.browser_factory import create_browser_context, navigate_with_cf_wait
 from scripts.extractors import (
     extract_match_info,
     extract_statistics,
@@ -149,16 +146,9 @@ class OgolScraper:
     )
     def _execute_scrape_logic(self, page, url: str):
         """Core logic with retry support"""
-        from scripts.utils.cloudflare import wait_for_cloudflare
-        
-        # Carregar página e aguardar conteúdo inicial
+        # Carregar página, aguardar CF e conteúdo inicial
         start_time = time.time()
-        page.goto(url, wait_until='domcontentloaded', timeout=NAVIGATION_TIMEOUT)
-        
-        # Wait for Cloudflare challenge to resolve (if present)
-        cf_resolved = wait_for_cloudflare(page, timeout=30)
-        if not cf_resolved:
-            raise InvalidDOMError(f"Cloudflare challenge did not resolve for {url}")
+        navigate_with_cf_wait(page, url, timeout=NAVIGATION_TIMEOUT)
         
         # Adaptive Throttle: sleep proportional to server response time
         response_time = time.time() - start_time
@@ -291,21 +281,9 @@ class OgolScraper:
         proxy_config = self.proxy_manager.get_proxy()
         
         with sync_playwright() as p:
-            # [NEW] Pass proxy to launch
-            browser = p.chromium.launch(
-                headless=self.headless,
-                args=BROWSER_ARGS,
-                proxy=proxy_config  # Inject proxy if available
+            browser, context, page = create_browser_context(
+                p, headless=self.headless, proxy=proxy_config
             )
-            # Contexto com anti-detecção e headers extras
-            context = browser.new_context(
-                user_agent=USER_AGENT,
-                viewport=VIEWPORT,
-                extra_http_headers=EXTRA_HEADERS,
-                locale='pt-BR',
-                timezone_id='America/Sao_Paulo'
-            )
-            page = context.new_page()
             
             try:
                 # Chama a lógica com retry

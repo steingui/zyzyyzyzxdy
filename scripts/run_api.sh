@@ -58,4 +58,12 @@ export FLASK_ENV=production
 export CACHE_REDIS_URL=${CACHE_REDIS_URL:-${REDIS_URL:-redis://localhost:6379/0}}
 
 
+# Kill any existing process on the target port
+if fuser "$PORT/tcp" >/dev/null 2>&1; then
+    echo "⚠️  Porta $PORT em uso — matando processo anterior..."
+    fuser -k "$PORT/tcp" >/dev/null 2>&1
+    sleep 1
+    echo "✅ Porta $PORT liberada"
+fi
+
 flask run --host=0.0.0.0 --port=$PORT

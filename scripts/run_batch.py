@@ -18,21 +18,14 @@ from pathlib import Path
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# Imports locais (assumindo execução da raiz ou pythonpath configurado)
-try:
-    from scripts.config import OGOL_BASE_URL
-    from scripts.utils.normalization import normalize_match_data
-    from scripts.db_importer import process_input
-    from scripts.utils.state import get_last_processed_round, check_match_exists
-    from scripts.utils.throttle import AdaptiveThrottle
-except ImportError:
-    # Fallback se rodar de dentro de scripts/
-    sys.path.append(str(Path(__file__).parent.parent))
-    from scripts.config import OGOL_BASE_URL
-    from scripts.utils.normalization import normalize_match_data
-    from scripts.db_importer import process_input
-    from scripts.utils.state import get_last_processed_round, check_match_exists
-    from scripts.utils.throttle import AdaptiveThrottle
+# Ensure project root is in path for scripts.* imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from scripts.config import OGOL_BASE_URL
+from scripts.utils.normalization import normalize_match_data
+from scripts.db_importer import process_input
+from scripts.utils.state import get_last_processed_round, check_match_exists
+from scripts.utils.throttle import AdaptiveThrottle
 
 # Configuração
 SCRIPTS_DIR = Path(__file__).parent

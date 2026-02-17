@@ -21,8 +21,8 @@ load_dotenv()
 import os
 sys.path.append(os.getcwd()) # Ensure root is in path
 from app.utils.logger import get_logger, slog, log_diagnostic
-from scripts.config import OGOL_BASE_URL, BROWSER_ARGS, EXTRA_HEADERS, VIEWPORT, USER_AGENT
-from scripts.utils.cloudflare import wait_for_cloudflare
+from scripts.config import OGOL_BASE_URL
+from scripts.utils.browser_factory import create_browser_context, navigate_with_cf_wait
 
 logger = get_logger(__name__)
 
@@ -44,28 +44,10 @@ def get_round_matches(league_slug: str, round_num: int = None):
          operation='navigate', url=url, league=league_slug, round=round_num)
     
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=BROWSER_ARGS)
-        context = browser.new_context(
-            user_agent=USER_AGENT,
-            viewport=VIEWPORT,
-            extra_http_headers=EXTRA_HEADERS,
-            locale='pt-BR',
-            timezone_id='America/Sao_Paulo'
-        )
-        page = context.new_page()
+        browser, context, page = create_browser_context(p)
         
         try:
-            page.goto(url, timeout=60000, wait_until="domcontentloaded")
-            
-            # Wait for Cloudflare challenge to resolve (if present)
-            cf_resolved = wait_for_cloudflare(page, timeout=30)
-            if not cf_resolved:
-                log_diagnostic(logger, "Cloudflare challenge blocked page load",
-                    component=COMPONENT, operation="cf_block",
-                    hint="Cloudflare did not clear. The IP may be flagged. Try again later or use a proxy.",
-                    url=url, league=league_slug, round=round_num,
-                    page_title=page.title())
-                return []
+            navigate_with_cf_wait(page, url)
             
             # Get page title for diagnostics
             page_title = page.title()
