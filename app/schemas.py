@@ -72,6 +72,7 @@ class EstatisticaPartidaSchema(SQLAlchemyAutoSchema):
     class Meta:
         model = EstatisticaPartida
         load_instance = True
+        include_fk = True
     
     @post_dump
     def normalize_fields(self, data, **kwargs):
@@ -91,6 +92,7 @@ class EventoSchema(SQLAlchemyAutoSchema):
     class Meta:
         model = Evento
         load_instance = True
+        include_fk = True
     time = fields.Nested(TimeSchema, only=("id", "nome"))
     jogador = fields.Nested(JogadorSchema, only=("id", "nome"))
     
@@ -116,10 +118,10 @@ class PartidaSchema(SQLAlchemyAutoSchema):
         load_instance = True
         include_fk = True
 
-    time_casa = fields.Nested(TimeSchema, only=("id", "nome"))
-    time_fora = fields.Nested(TimeSchema, only=("id", "nome"))
-    estadio = fields.Nested(EstadioSchema, only=("id", "nome"))
-    arbitro = fields.Nested(ArbitroSchema, only=("id", "nome"))
+    time_casa = fields.Nested(TimeSchema)
+    time_fora = fields.Nested(TimeSchema)
+    estadio = fields.Nested(EstadioSchema)
+    arbitro = fields.Nested(ArbitroSchema)
     estatisticas = fields.Nested(EstatisticaPartidaSchema)
     eventos = fields.List(fields.Nested(EventoSchema))
     

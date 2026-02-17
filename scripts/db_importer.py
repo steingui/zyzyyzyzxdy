@@ -105,7 +105,7 @@ def get_connection():
 def get_or_create_time(cursor, nome: str) -> int:
     """Busca ou cria um time pelo nome usando ON CONFLICT para segurança paralela."""
     cursor.execute("""
-        INSERT INTO times (nome) VALUES (%s)
+        INSERT INTO times (nome, created_at) VALUES (%s, CURRENT_TIMESTAMP)
         ON CONFLICT (nome) DO UPDATE SET nome = EXCLUDED.nome
         RETURNING id
     """, (nome,))
@@ -197,8 +197,8 @@ def insert_partida(cursor, data: dict, time_casa_id: int, time_fora_id: int,
             gols_casa, gols_fora,
             gols_casa_intervalo, gols_fora_intervalo,
             data_hora, estadio_id, arbitro_id, publico, url_fonte, status,
-            metadata, liga_id, ano
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'finished', %s, %s, %s)
+            metadata, liga_id, ano, created_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'finished', %s, %s, %s, CURRENT_TIMESTAMP)
         ON CONFLICT (temporada_id, rodada, time_casa_id, time_fora_id) 
         DO UPDATE SET
             gols_casa = EXCLUDED.gols_casa,
@@ -257,10 +257,12 @@ def insert_estatisticas(cursor, partida_id: int, data: dict):
             cortes_casa, cortes_fora,
             amarelos_casa, amarelos_fora,
             vermelhos_casa, vermelhos_fora,
-            metadata
+            metadata,
+            updated_at
         ) VALUES (
             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+            CURRENT_TIMESTAMP
         )
         ON CONFLICT (partida_id) 
         DO UPDATE SET
