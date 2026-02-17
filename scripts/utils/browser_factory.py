@@ -88,18 +88,36 @@ def create_browser_context(
 def _is_cloudflare_challenge(page: Page) -> bool:
     """Check if the current page is a Cloudflare challenge."""
     try:
+        # If page is closed/crashed, this might raise
         title = page.title().lower()
-        # Check all indicators against title
-        if any(ind in title for ind in _CF_INDICATORS):
-            return True
         
-        # Check body text
+        # Check all indicators against title
+        for ind in _CF_INDICATORS:
+            if ind in title:
+                logger.debug(f"CF Challenge detected by title: '{title}' (indicator: '{ind}')")
+                return True
+        
+        # Check body text - if this fails (e.g. context destroyed), we should probably 
+        # assume we are still loading/transitioning, hence NOT strictly "resolved" yet.
+        # But for this boolean check, if we can't read body, we can't confirm challenge.
+        # Let's rely on title mostly.
+        
         body_text = page.evaluate(
             "document.body?.innerText?.substring(0, 500)?.toLowerCase() || ''"
         )
-        return any(ind in body_text for ind in _CF_INDICATORS)
-    except Exception:
+        
+        for ind in _CF_INDICATORS:
+            if ind in body_text:
+                logger.debug(f"CF Challenge detected by body text: '{ind}' found in first 500 chars.")
+                return True
+                
         return False
+    except Exception as e:
+        # If we can't interact with the page, assume it's unstable/loading.
+        # We should NOT return False (== Resolved) because that breaks the wait loop.
+        # We'll log and return True to keep waiting.
+        logger.debug(f"Error checking CF state: {e}")
+        return True
 
 
 def wait_for_cloudflare(page: Page, timeout: int = 30, poll_interval: float = 2.0) -> bool:
@@ -108,6 +126,7 @@ def wait_for_cloudflare(page: Page, timeout: int = 30, poll_interval: float = 2.
 
     Returns True if resolved (or no challenge detected), False if timed out.
     """
+    # Initial check
     if not _is_cloudflare_challenge(page):
         return True
 
@@ -118,7 +137,31 @@ def wait_for_cloudflare(page: Page, timeout: int = 30, poll_interval: float = 2.
     start = time.time()
     while time.time() - start < timeout:
         time.sleep(poll_interval)
+        
+        # Debug log for waiting
+        elapsed = round(time.time() - start, 1)
+        if int(elapsed) % 5 == 0:
+             logger.debug(f"Waiting for CF... ({elapsed}s/{timeout}s) - Title: {page.title()}")
+
+        # If is_cloudflare_challenge returns False, it means we are CLEAR.
         if not _is_cloudflare_challenge(page):
+            # Double check to ensure we didn't just hit a transient error state
+            # (though _is_cloudflare_challenge now returns True on error)
+            
+            # Dismiss "AVANÇAR" / Ads modal if present (seen in production/debug)
+            try:
+                # Naive click on typical ad overlay buttons if they exist
+                page.evaluate("""(() => {
+                    const buttons = Array.from(document.querySelectorAll('button, a, div'));
+                    const avanzar = buttons.find(b => b.innerText && b.innerText.includes('AVANÇAR'));
+                    if (avanzar) {
+                         console.log("Clicking AVANÇAR button");
+                         avanzar.click();
+                    }
+                })()""")
+            except:
+                pass
+
             elapsed = round(time.time() - start, 1)
             slog(logger, "info", "Cloudflare challenge resolved",
                  component=COMPONENT, operation="cf_resolved",
