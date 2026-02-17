@@ -23,6 +23,10 @@ COMPONENT = "browser"
 _CF_INDICATORS = [
     "just a moment",
     "checking your browser",
+    "um momento",
+    "verificando",
+    "attention required",
+    "security check",
     "cloudflare",
     "ray id",
 ]
