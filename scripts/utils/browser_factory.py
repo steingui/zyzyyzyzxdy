@@ -54,14 +54,30 @@ def create_browser_context(
         args=BROWSER_ARGS,
         proxy=proxy,
     )
+    
+    # Randomize viewport slightly to avoid fingerprinting
+    import random
+    width = VIEWPORT['width'] + random.randint(-50, 50)
+    height = VIEWPORT['height'] + random.randint(-50, 50)
+    
     context = browser.new_context(
         user_agent=USER_AGENT,
-        viewport=VIEWPORT,
+        viewport={'width': width, 'height': height},
         extra_http_headers=EXTRA_HEADERS,
         locale="pt-BR",
         timezone_id="America/Sao_Paulo",
+        permissions=['geolocation'],
     )
-    page = context.new_page()
+    
+    # Try to apply stealth
+    try:
+        from playwright_stealth import stealth_sync
+        page = context.new_page()
+        stealth_sync(page)
+    except ImportError:
+        logger.warning("playwright-stealth not installed, running without it")
+        page = context.new_page()
+
     return browser, context, page
 
 
