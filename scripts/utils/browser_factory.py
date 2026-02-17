@@ -76,6 +76,39 @@ def create_browser_context(
         stealth_sync(page)
         logger.info("Playwright-Stealth applied successfully")
         
+        # MANUAL OVERRIDES FOR HARDWARE FINGERPRINTING
+        # SwiftShader is a dead giveaway of a headless/server environment.
+        # We spoof a realistic consumer GPU (Intel Iris Xe on Windows).
+        page.add_init_script("""
+            (() => {
+                const getParameter = WebGLRenderingContext.prototype.getParameter;
+                WebGLRenderingContext.prototype.getParameter = function(parameter) {
+                    // UNMASKED_VENDOR_WEBGL
+                    if (parameter === 37445) {
+                        return 'Intel Inc.';
+                    }
+                    // UNMASKED_RENDERER_WEBGL
+                    if (parameter === 37446) {
+                        return 'Intel(R) Iris(R) Xe Graphics';
+                    }
+                    return getParameter.apply(this, arguments);
+                };
+                
+                const getParameter2 = WebGL2RenderingContext.prototype.getParameter;
+                WebGL2RenderingContext.prototype.getParameter = function(parameter) {
+                    // UNMASKED_VENDOR_WEBGL
+                    if (parameter === 37445) {
+                        return 'Intel Inc.';
+                    }
+                    // UNMASKED_RENDERER_WEBGL
+                    if (parameter === 37446) {
+                        return 'Intel(R) Iris(R) Xe Graphics';
+                    }
+                    return getParameter2.apply(this, arguments);
+                };
+            })();
+        """)
+        
         # LOG DIAGNOSTICS
         try:
             # 1. Basic Props
