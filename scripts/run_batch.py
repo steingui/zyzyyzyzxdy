@@ -10,6 +10,7 @@ run_batch.py - Executa o scraper para toda a rodada (Paralelo + Incremental)
 
 import json
 import logging
+import os
 import subprocess
 import sys
 import time
@@ -245,7 +246,7 @@ def run_batch_pipeline(league_slug, year, round_num=None, job_id=None):
     logger.info(f"📊 Total de jogos a processar: {total_urls}")
     
     # 3. Executar scraping em paralelo (ThreadPool - Anti-Block)
-    MAX_WORKERS = 3  # Respeitar servidor
+    MAX_WORKERS = int(os.environ.get('SCRAPE_MAX_WORKERS', '1'))  # Default 1 for memory-constrained environments
     
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         # Submit tasks

@@ -29,4 +29,4 @@ ENV PYTHONPATH=/app
 EXPOSE 8000
 
 # Start Gunicorn
-CMD ["gunicorn", "api_app:app", "--bind", "0.0.0.0:8000", "--timeout", "120", "--workers", "2"]
+CMD ["gunicorn", "api_app:app", "--bind", "0.0.0.0:8000", "--timeout", "120", "--workers", "1"]

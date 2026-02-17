@@ -38,6 +38,9 @@ KEY_JOBS = "scrape:jobs"
 # Constants
 MAX_RETRIES = 3
 RETRY_DELAY = 10 # Seconds
+MAX_RECOVERY_ATTEMPTS = 3  # Circuit breaker: stop recovering jobs that OOM repeatedly
+WORKER_LOCK_KEY = "scrape:worker_lock"
+WORKER_LOCK_TTL = 300  # seconds
 
 # Worker controls (In-process thread)
 worker_thread = None
@@ -73,10 +76,15 @@ def recover_stuck_jobs():
     """
     On startup, find jobs that were in 'processing' or 'queued' but 
     never finished (app crash) and put them back in the queue.
+    
+    Circuit breaker: if a job has been recovered too many times
+    (MAX_RECOVERY_ATTEMPTS), it means it consistently OOMs or fails.
+    Mark it as 'failed' instead of re-queuing to break the crash loop.
     """
     logger.info("🔍 Checking for stuck jobs...")
     jobs = load_jobs()
     recovered_count = 0
+    failed_count = 0
     
     # Get current queue content to avoid duplicates
     try:
@@ -89,8 +97,21 @@ def recover_stuck_jobs():
         status = job_data.get('status')
         if status in ['processing', 'queued']:
             if job_id not in enqueued_job_ids:
-                logger.warning(f"🔄 Recovering stuck job: {job_id} (Status: {status})")
+                recovery_count = job_data.get('recovery_count', 0) + 1
+                
+                # Circuit breaker: too many recoveries = permanent failure
+                if recovery_count > MAX_RECOVERY_ATTEMPTS:
+                    logger.error(f"💀 Job {job_id} exceeded max recovery attempts ({MAX_RECOVERY_ATTEMPTS}). Marking as failed.")
+                    job_data['status'] = 'failed'
+                    job_data['error'] = f'Exceeded max recovery attempts ({MAX_RECOVERY_ATTEMPTS}). Likely OOM.'
+                    job_data['completed_at'] = datetime.utcnow().isoformat() + 'Z'
+                    save_job(job_data)
+                    failed_count += 1
+                    continue
+                
+                logger.warning(f"🔄 Recovering stuck job: {job_id} (Status: {status}, Recovery #{recovery_count})")
                 job_data['status'] = 'queued'
+                job_data['recovery_count'] = recovery_count
                 job_data['recovered_at'] = datetime.utcnow().isoformat() + 'Z'
                 save_job(job_data)
                 redis_client.lpush(KEY_QUEUE, json.dumps(job_data))
@@ -98,7 +119,9 @@ def recover_stuck_jobs():
     
     if recovered_count > 0:
         logger.info(f"✅ Recovered {recovered_count} stuck jobs.")
-    else:
+    if failed_count > 0:
+        logger.warning(f"💀 Failed {failed_count} jobs (exceeded max recovery attempts).")
+    if recovered_count == 0 and failed_count == 0:
         logger.info("✨ No stuck jobs found.")
 
 def scrape_worker():
@@ -196,24 +219,45 @@ def scrape_worker():
     logger.info("🛑 Scraping worker thread stopped")
 
 def start_worker():
-    """Start the background worker thread if not already running"""
+    """Start the background worker thread if not already running.
+    Uses a Redis lock to ensure only ONE process (gunicorn worker) starts the thread.
+    """
     global worker_thread, worker_running
     
-    if worker_thread is None or not worker_thread.is_alive():
-        # 1. Recovery first
-        try:
-            recover_stuck_jobs()
-        except Exception as e:
-            logger.error(f"Failed to recover stuck jobs: {e}")
+    if worker_thread is not None and worker_thread.is_alive():
+        return  # Already running in this process
+    
+    # Redis-based singleton: only one gunicorn worker should run the scrape thread
+    try:
+        acquired = redis_client.set(WORKER_LOCK_KEY, os.getpid(), nx=True, ex=WORKER_LOCK_TTL)
+        if not acquired:
+            logger.info("⏭️ Another worker process owns the scrape thread lock. Skipping.")
+            return
+    except Exception as e:
+        logger.error(f"Redis lock error: {e}. Starting worker anyway (fallback).")
+    
+    # 1. Recovery first
+    try:
+        recover_stuck_jobs()
+    except Exception as e:
+        logger.error(f"Failed to recover stuck jobs: {e}")
 
-        # 2. Start thread
-        worker_running = True
-        worker_thread = threading.Thread(target=scrape_worker, daemon=True, name="ScrapeWorker")
-        worker_thread.start()
-        logger.info("✅ Scraping worker thread initialized")
+    # 2. Start thread
+    worker_running = True
+    worker_thread = threading.Thread(target=scrape_worker, daemon=True, name="ScrapeWorker")
+    worker_thread.start()
+    logger.info("✅ Scraping worker thread initialized")
 
-# Start worker on module import
-start_worker()
+
+@scrape_bp.before_app_request
+def _ensure_worker_started():
+    """Lazily start the worker on first request instead of on module import."""
+    start_worker()
+    # Remove itself after first invocation to avoid overhead on every request
+    scrape_bp.before_app_request_funcs[None] = [
+        f for f in scrape_bp.before_app_request_funcs.get(None, [])
+        if f is not _ensure_worker_started
+    ]
 
 @scrape_bp.route('', methods=['POST'])
 def start_scrape():
