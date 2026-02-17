@@ -43,44 +43,11 @@ LOG_DIR.mkdir(exist_ok=True)
 # Shared Resources
 global_throttle = AdaptiveThrottle()
 
-# Structured logging setup
-class StructuredFormatter(logging.Formatter):
-    """Custom formatter that outputs JSON logs with context"""
-    def format(self, record):
-        log_obj = {
-            "timestamp": datetime.now().isoformat(),
-            "level": record.levelname,
-            "message": record.getMessage(),
-            "module": record.module,
-            "function": record.funcName,
-        }
-        # Add extra fields if present
-        if hasattr(record, 'job_context'):
-            log_obj.update(record.job_context)
-        return json.dumps(log_obj, ensure_ascii=False)
-
 # Configuração de Logs (RFC 005)
-from app.utils.logger import get_logger
+from app.utils.logger import get_logger, slog, log_diagnostic
 logger = get_logger(__name__)
 
-# Add JSON handler for structured logs
-json_handler = logging.FileHandler(LOG_DIR / "batch_structured.log")
-json_handler.setFormatter(StructuredFormatter())
-logger.addHandler(json_handler)
-
-def log_with_context(level, message, **context):
-    """Helper function to log with additional context (structured logging)"""
-    # Map 'success' to 'info' since logger doesn't have success level
-    if level == 'success':
-        level = 'info'
-        message = f"✅ {message}"  # Visual indicator for success
-    
-    # Create a log record with extra context
-    extra_record = type('obj', (object,), {'job_context': context})()
-    
-    # Get logger level method
-    log_method = getattr(logger, level.lower(), logger.info)
-    log_method(message, extra=extra_record.__dict__)
+COMPONENT = "pipeline"
 
 def get_matches(league_slug: str, year: int, force_round: int = None):
     """Calcula próxima rodada (ou usa forçada) e chama o crawler diretamente."""
@@ -88,28 +55,36 @@ def get_matches(league_slug: str, year: int, force_round: int = None):
     
     if force_round:
         next_round = force_round
-        logger.info(f"MODO MANUAL: Forçando busca da rodada: {next_round}")
+        slog(logger, 'info', 'Forced round mode', component=COMPONENT,
+             operation='discover_round', round=next_round, league=league_slug)
     else:
         last_round = get_last_processed_round()
         next_round = last_round + 1
-        logger.info(f"Última rodada no banco: {last_round}. Buscando rodada: {next_round}")
+        slog(logger, 'info', 'Auto-detected next round', component=COMPONENT,
+             operation='discover_round', last_round_in_db=last_round, next_round=next_round)
     
     try:
         urls = get_round_matches(league_slug=league_slug, round_num=next_round)
         
         if not urls:
-            logger.warning(f"Rodada {next_round} não tem jogos disponíveis ou prontos.")
+            slog(logger, 'warning', 'No matches available for round', component=COMPONENT,
+                 operation='discover_round', round=next_round, league=league_slug)
             return []
             
-        logger.info(f"✅ Crawler encontrou {len(urls)} jogos na rodada {next_round}")
+        slog(logger, 'info', 'Crawler found matches', component=COMPONENT,
+             operation='discover_round', round=next_round, matches_found=len(urls))
         return urls
     except Exception as e:
-        logger.error(f"❌ Falha ao buscar jogos da rodada {next_round}: {e}", exc_info=True)
+        log_diagnostic(logger, 'Failed to fetch round matches',
+            component=COMPONENT, operation='discover_round', error=e,
+            hint='get_round_matches raised an exception. Check crawler diagnostic logs above.',
+            round=next_round, league=league_slug)
         return []
 
 def scrape_match(url, index, total):
     """Executa o scraper para um único jogo (Resilience Layer: OgolScraper handles retries internally)."""
-    logger.info(f"[{index}/{total}] Iniciando scraping: {url}")
+    slog(logger, 'info', 'Starting match scrape', component=COMPONENT,
+         operation='scrape_match', url=url, match_index=index, total_matches=total)
     
     try:
         # Import local para evitar problemas de escopo/path se importado no topo
@@ -127,12 +102,20 @@ def scrape_match(url, index, total):
         try:
              from scripts.exceptions import InvalidDOMError
              if isinstance(e, InvalidDOMError):
-                 logger.error(f"🚫 DOM INVÁLIDO (Anti-Garbage): {url} - {e}")
+                 log_diagnostic(logger, 'Invalid DOM detected - anti-garbage filter',
+                      component=COMPONENT, operation='dom_validation',
+                      error=e,
+                      hint='Page loaded but DOM structure is invalid. Anti-bot or layout change.',
+                      url=url)
                  return None
         except ImportError:
              pass
 
-        logger.error(f"❌ Falha fatal ao processar {url}: {e}")
+        log_diagnostic(logger, 'Fatal error processing match',
+            component=COMPONENT, operation='scrape_match',
+            error=e,
+            hint='Unrecoverable error during scraping. Check scraper logs for DOM/network details.',
+            url=url)
         return None
 
 def main():
@@ -157,16 +140,11 @@ def run_batch_pipeline(league_slug, year, round_num=None, job_id=None):
         job_id = f"{league_slug}_{year}_r{round_num}_{int(time.time())}"
     
     # Log job start with full context
-    log_with_context('info', 'Pipeline started',
-        job_id=job_id,
-        league=league_slug,
-        year=year,
-        round=round_num if round_num else 'auto',
-        hostname=socket.gethostname(),
-        timestamp=start_time.isoformat()
-    )
-    
-    logger.info(f"🚀 Starting scrape: {league_slug} {year} Round {round_num}")
+    slog(logger, 'info', 'Pipeline started', component=COMPONENT,
+         operation='pipeline_start', job_id=job_id,
+         league=league_slug, year=year,
+         round=round_num if round_num else 'auto',
+         hostname=socket.gethostname())
     
     # Adicionar path raiz ao pythonpath para imports funcionarem dentro das threads
     sys.path.append(str(Path.cwd()))
@@ -174,12 +152,10 @@ def run_batch_pipeline(league_slug, year, round_num=None, job_id=None):
     # 1. Obter lista de jogos
     urls = get_matches(force_round=round_num, league_slug=league_slug, year=year)
     if not urls:
-        log_with_context('warning', 'No matches found',
-            job_id=job_id,
-            league=league_slug,
-            round=round_num
-        )
-        logger.info("Pipeline encerrado: Nenhum jogo disponível para processar na próxima rodada.")
+        log_diagnostic(logger, 'No matches found for round',
+            component=COMPONENT, operation='discover_matches',
+            hint='Crawler returned empty list. Either the round has not started or the page structure changed. Check crawler diagnostic logs above.',
+            job_id=job_id, league=league_slug, round=round_num)
         return {"status": "completed", "matches_scraped": 0, "total_matches": 0}
         
     # 2. Carregar progresso anterior (JSON local) - Backup Legacy
@@ -228,12 +204,11 @@ def run_batch_pipeline(league_slug, year, round_num=None, job_id=None):
     total_urls = len(urls)
     success_count = 0
     
-    log_with_context('info', 'Matches discovered',
-        job_id=job_id,
-        total_matches=total_urls,
-        urls=urls[:3]  # Log first 3 for reference
-    )
-    logger.info(f"📊 Total de jogos a processar: {total_urls}")
+    slog(logger, 'info', 'Matches discovered, starting parallel scrape', component=COMPONENT,
+         operation='scrape_batch', job_id=job_id,
+         total_matches=total_urls, skipped_db=skipped_count,
+         max_workers=int(os.environ.get('SCRAPE_MAX_WORKERS', '1')),
+         sample_urls=urls[:3])
     
     # 3. Executar scraping em paralelo (ThreadPool - Anti-Block)
     MAX_WORKERS = int(os.environ.get('SCRAPE_MAX_WORKERS', '1'))  # Default 1 for memory-constrained environments
@@ -254,16 +229,13 @@ def run_batch_pipeline(league_slug, year, round_num=None, job_id=None):
                     results["games"].append(data)
                     success_count += 1
                     
-                    log_with_context('info', 'Match scraped',
-                        job_id=job_id,
-                        match_index=success_count,
-                        total_matches=total_urls,
-                        home_team=data.get('home_team'),
-                        away_team=data.get('away_team'),
-                        score=f"{data.get('home_score')}-{data.get('away_score')}",
-                        url=url
-                    )
-                    logger.info(f"✅ Sucesso ({success_count}/{total_urls}): {url}")
+                    slog(logger, 'info', 'Match scraped successfully', component=COMPONENT,
+                         operation='match_complete', job_id=job_id,
+                         match_index=success_count, total_matches=total_urls,
+                         home_team=data.get('home_team'),
+                         away_team=data.get('away_team'),
+                         score=f"{data.get('home_score')}-{data.get('away_score')}",
+                         url=url)
                     
                     # 4. Normalização e Persistência no Banco
                     try:
@@ -273,26 +245,21 @@ def run_batch_pipeline(league_slug, year, round_num=None, job_id=None):
                         db_duration = time.time() - db_start
                         
                         if db_success:
-                            log_with_context('info', 'Match saved to database',
-                                job_id=job_id,
-                                url=url,
-                                db_duration_ms=int(db_duration * 1000)
-                            )
-                            logger.info(f"💾 DB Insert OK: {url}")
+                            slog(logger, 'info', 'Match saved to database', component=COMPONENT,
+                                 operation='db_insert', job_id=job_id, url=url,
+                                 db_duration_ms=int(db_duration * 1000))
                         else:
-                            log_with_context('error', 'Failed to save match to database',
-                                job_id=job_id,
-                                url=url
-                            )
-                            logger.error(f"❌ DB Insert FALHOU: {url}")
+                            log_diagnostic(logger, 'Failed to save match to database',
+                                component=COMPONENT, operation='db_insert',
+                                hint='process_input returned False. Check db_importer logs above for SQL error details.',
+                                job_id=job_id, url=url,
+                                home_team=data.get('home_team'), away_team=data.get('away_team'))
                     except Exception as e:
-                        log_with_context('error', 'Critical error saving to database',
-                            job_id=job_id,
-                            url=url,
-                            error=str(e),
-                            error_type=type(e).__name__
-                        )
-                        logger.error(f"❌ Erro crítico ao salvar no banco (continuando batch): {e}")
+                        log_diagnostic(logger, 'Critical error saving to database',
+                            component=COMPONENT, operation='db_insert',
+                            error=e,
+                            hint='Unexpected exception during DB persistence. The match was scraped successfully but not saved.',
+                            job_id=job_id, url=url)
 
                     # Salvamento Incremental (Thread-safe aqui na main thread)
                     try:
@@ -302,38 +269,27 @@ def run_batch_pipeline(league_slug, year, round_num=None, job_id=None):
                     except Exception as e:
                         logger.error(f"Erro ao salvar arquivo incrementalmente: {e}")
                 else:
-                    log_with_context('error', 'Failed to scrape match',
-                        job_id=job_id,
-                        url=url
-                    )
-                    logger.error(f"❌ Falha ao processar: {url}")
+                    log_diagnostic(logger, 'Scraper returned empty data for match',
+                        component=COMPONENT, operation='scrape_match',
+                        hint='OgolScraper.scrape() returned None/empty. Check scraper diagnostic logs above.',
+                        job_id=job_id, url=url)
             except Exception as e:
-                log_with_context('error', 'Unhandled exception in thread',
-                    job_id=job_id,
-                    url=url,
-                    error=str(e),
-                    error_type=type(e).__name__
-                )
-                logger.error(f"❌ Exceção não tratada na thread para {url}: {e}")
+                log_diagnostic(logger, 'Unhandled exception in scrape thread',
+                    component=COMPONENT, operation='thread_result',
+                    error=e,
+                    hint='ThreadPoolExecutor future raised. This is an infrastructure-level error, not a scraping error.',
+                    job_id=job_id, url=url)
 
     duration = datetime.now() - start_time
     
     # Final summary log
-    log_with_context('info', 'Pipeline completed',
-        job_id=job_id,
-        league=league_slug,
-        year=year,
-        round=round_num,
-        total_matches=total_urls,
-        successful=success_count,
-        failed=total_urls - success_count,
-        duration_seconds=int(duration.total_seconds()),
-        success_rate=f"{(success_count/total_urls*100):.1f}%" if total_urls > 0 else "0%"
-    )
-    
-    logger.info(f"🏁 Processamento concluído em {duration}.")
-    logger.info(f"Sucesso: {success_count}/{total_urls}")
-    logger.info(f"Dados salvos em: {OUTPUT_FILE.absolute()}")
+    slog(logger, 'info', 'Pipeline completed', component=COMPONENT,
+         operation='pipeline_complete', job_id=job_id,
+         league=league_slug, year=year, round=round_num,
+         total_matches=total_urls, successful=success_count,
+         failed=total_urls - success_count,
+         duration_seconds=int(duration.total_seconds()),
+         success_rate=f"{(success_count/total_urls*100):.1f}%" if total_urls > 0 else "0%")
     
     return {
         "status": "completed",

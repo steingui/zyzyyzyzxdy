@@ -24,8 +24,10 @@ from scripts.run_batch import run_batch_pipeline
 scrape_bp = Blueprint('scrape', __name__, url_prefix='/api/scrape')
 
 # Logging
-from app.utils.logger import get_logger
+from app.utils.logger import get_logger, slog, log_diagnostic
 logger = get_logger(__name__)
+
+COMPONENT = "worker"
 
 # Redis Configuration
 REDIS_URL = os.getenv('REDIS_URL', os.getenv('CACHE_REDIS_URL', 'redis://localhost:6379/0'))
@@ -52,7 +54,8 @@ def get_job(job_id):
         data = redis_client.hget(KEY_JOBS, job_id)
         return json.loads(data) if data else None
     except Exception as e:
-        logger.error("Redis error in get_job", extra={"error": str(e)})
+        slog(logger, 'error', 'Redis error in get_job', component=COMPONENT,
+             operation='redis_read', error_type=type(e).__name__, error_message=str(e))
         return None
 
 def save_job(job_data):
@@ -61,7 +64,8 @@ def save_job(job_data):
         job_id = job_data['job_id']
         redis_client.hset(KEY_JOBS, job_id, json.dumps(job_data))
     except Exception as e:
-        logger.error("Redis error in save_job", extra={"error": str(e)})
+        slog(logger, 'error', 'Redis error in save_job', component=COMPONENT,
+             operation='redis_write', job_id=job_data.get('job_id'), error_message=str(e))
 
 def load_jobs():
     """Load all jobs from Redis"""
@@ -69,7 +73,8 @@ def load_jobs():
         raw = redis_client.hgetall(KEY_JOBS)
         return {k: json.loads(v) for k, v in raw.items()}
     except Exception as e:
-        logger.error("Redis error in load_jobs", extra={"error": str(e)})
+        slog(logger, 'error', 'Redis error in load_jobs', component=COMPONENT,
+             operation='redis_read', error_message=str(e))
         return {}
 
 def recover_stuck_jobs():
@@ -81,7 +86,8 @@ def recover_stuck_jobs():
     (MAX_RECOVERY_ATTEMPTS), it means it consistently OOMs or fails.
     Mark it as 'failed' instead of re-queuing to break the crash loop.
     """
-    logger.info("🔍 Checking for stuck jobs...")
+    slog(logger, 'info', 'Checking for stuck jobs on startup', component=COMPONENT,
+         operation='recover_stuck_jobs')
     jobs = load_jobs()
     recovered_count = 0
     failed_count = 0
@@ -101,7 +107,11 @@ def recover_stuck_jobs():
                 
                 # Circuit breaker: too many recoveries = permanent failure
                 if recovery_count > MAX_RECOVERY_ATTEMPTS:
-                    logger.error(f"💀 Job {job_id} exceeded max recovery attempts ({MAX_RECOVERY_ATTEMPTS}). Marking as failed.")
+                    log_diagnostic(logger, 'Job exceeded max recovery attempts - circuit breaker triggered',
+                        component=COMPONENT, operation='circuit_breaker',
+                        hint='This job has been recovered too many times. Likely cause: the scrape consistently OOMs or crashes. Check memory usage and reduce SCRAPE_MAX_WORKERS.',
+                        job_id=job_id, recovery_count=recovery_count,
+                        max_attempts=MAX_RECOVERY_ATTEMPTS, last_status=status)
                     job_data['status'] = 'failed'
                     job_data['error'] = f'Exceeded max recovery attempts ({MAX_RECOVERY_ATTEMPTS}). Likely OOM.'
                     job_data['completed_at'] = datetime.utcnow().isoformat() + 'Z'
@@ -109,7 +119,9 @@ def recover_stuck_jobs():
                     failed_count += 1
                     continue
                 
-                logger.warning(f"🔄 Recovering stuck job: {job_id} (Status: {status}, Recovery #{recovery_count})")
+                slog(logger, 'warning', 'Recovering stuck job', component=COMPONENT,
+                     operation='recover_job', job_id=job_id, previous_status=status,
+                     recovery_count=recovery_count, max_attempts=MAX_RECOVERY_ATTEMPTS)
                 job_data['status'] = 'queued'
                 job_data['recovery_count'] = recovery_count
                 job_data['recovered_at'] = datetime.utcnow().isoformat() + 'Z'
@@ -117,12 +129,9 @@ def recover_stuck_jobs():
                 redis_client.lpush(KEY_QUEUE, json.dumps(job_data))
                 recovered_count += 1
     
-    if recovered_count > 0:
-        logger.info(f"✅ Recovered {recovered_count} stuck jobs.")
-    if failed_count > 0:
-        logger.warning(f"💀 Failed {failed_count} jobs (exceeded max recovery attempts).")
-    if recovered_count == 0 and failed_count == 0:
-        logger.info("✨ No stuck jobs found.")
+    slog(logger, 'info', 'Stuck job recovery complete', component=COMPONENT,
+         operation='recover_stuck_jobs', recovered=recovered_count,
+         failed_circuit_breaker=failed_count, total_inspected=len(jobs))
 
 def scrape_worker():
     """
@@ -130,7 +139,8 @@ def scrape_worker():
     Runs one job at a time in-process with Retry logic.
     """
     global worker_running
-    logger.info("🚀 Scraping worker thread started (In-Process Reliable)")
+    slog(logger, 'info', 'Scraping worker thread started', component=COMPONENT,
+         operation='thread_start', pid=os.getpid(), thread_name='ScrapeWorker')
     
     scraper_logger = logging.getLogger('scripts.run_batch')
     
@@ -150,7 +160,9 @@ def scrape_worker():
             log_file = job_data.get('log_file')
             retry_count = job_data.get('retry_count', 0)
             
-            logger.info(f"👷 processing job {job_id} (Attempt {retry_count + 1})")
+            slog(logger, 'info', 'Processing job', component=COMPONENT,
+                 operation='job_start', job_id=job_id, attempt=retry_count + 1,
+                 league=league_slug, year=year, round=round_num)
             
             # Setup dynamic log file handler
             handler = None
@@ -183,10 +195,16 @@ def scrape_worker():
                 job_data['completed_at'] = datetime.utcnow().isoformat() + 'Z'
                 
             except Exception as inner_e:
-                logger.error(f"❌ Scraper function failed for {job_id}: {inner_e}")
+                log_diagnostic(logger, 'Scraper function failed for job',
+                    component=COMPONENT, operation='job_execute',
+                    error=inner_e,
+                    hint='The run_batch_pipeline raised an exception. Check crawler/scraper logs above for root cause.',
+                    job_id=job_id, attempt=retry_count + 1, league=league_slug, round=round_num)
                 
                 if retry_count < MAX_RETRIES:
-                    logger.warning(f"🔄 Retrying job {job_id} in {RETRY_DELAY}s... ({retry_count + 1}/{MAX_RETRIES})")
+                    slog(logger, 'warning', 'Retrying failed job after delay', component=COMPONENT,
+                         operation='job_retry', job_id=job_id, retry_count=retry_count + 1,
+                         max_retries=MAX_RETRIES, delay_seconds=RETRY_DELAY)
                     job_data['status'] = 'queued'
                     job_data['retry_count'] = retry_count + 1
                     job_data['last_error'] = str(inner_e)
@@ -197,7 +215,10 @@ def scrape_worker():
                     redis_client.rpush(KEY_QUEUE, json.dumps(job_data))
                     continue # Skip the rest of loop to not close handler yet? No, better close and reopen.
                 else:
-                    logger.error(f"💀 Job {job_id} failed after {MAX_RETRIES} retries.")
+                    log_diagnostic(logger, 'Job permanently failed after all retries',
+                        component=COMPONENT, operation='job_final_failure',
+                        hint='All retry attempts exhausted. Review crawler and scraper diagnostic logs above for root cause.',
+                        job_id=job_id, max_retries=MAX_RETRIES, last_error=str(inner_e))
                     job_data['status'] = 'failed'
                     job_data['error'] = str(inner_e)
                     job_data['completed_at'] = datetime.utcnow().isoformat() + 'Z'
@@ -208,15 +229,23 @@ def scrape_worker():
                 handler.close()
             
             save_job(job_data)
-            logger.info(f"✅ Job {job_id} finished with status {job_data['status']}")
+            slog(logger, 'info', 'Job finished', component=COMPONENT,
+                 operation='job_complete', job_id=job_id, final_status=job_data['status'],
+                 matches_scraped=job_data.get('matches_scraped'),
+                 duration_seconds=job_data.get('duration_seconds'))
             
         except redis.ConnectionError:
-            logger.error("❌ Redis connection lost in worker. Retrying...")
+            log_diagnostic(logger, 'Redis connection lost in worker',
+                component=COMPONENT, operation='redis_connection',
+                hint='Redis became unreachable. Worker will retry in 5s. If persistent, check REDIS_URL env var and Redis service health.')
             time.sleep(5)
         except Exception as e:
-            logger.error("❌ Worker loop error", extra={"error": str(e)}, exc_info=True)
+            log_diagnostic(logger, 'Unexpected worker loop error',
+                component=COMPONENT, operation='worker_loop', error=e,
+                hint='Unhandled exception in the main worker loop. This should not happen.')
     
-    logger.info("🛑 Scraping worker thread stopped")
+    slog(logger, 'info', 'Scraping worker thread stopped', component=COMPONENT,
+         operation='thread_stop')
 
 def start_worker():
     """Start the background worker thread if not already running.
@@ -231,22 +260,28 @@ def start_worker():
     try:
         acquired = redis_client.set(WORKER_LOCK_KEY, os.getpid(), nx=True, ex=WORKER_LOCK_TTL)
         if not acquired:
-            logger.info("⏭️ Another worker process owns the scrape thread lock. Skipping.")
+            slog(logger, 'info', 'Another worker process owns the scrape thread lock, skipping',
+                 component=COMPONENT, operation='singleton_check')
             return
     except Exception as e:
-        logger.error(f"Redis lock error: {e}. Starting worker anyway (fallback).")
+        log_diagnostic(logger, 'Redis lock error, starting worker anyway as fallback',
+            component=COMPONENT, operation='singleton_lock', error=e,
+            hint='Could not acquire Redis lock. Starting worker regardless. Risk: duplicate workers if another process is also running.')
     
     # 1. Recovery first
     try:
         recover_stuck_jobs()
     except Exception as e:
-        logger.error(f"Failed to recover stuck jobs: {e}")
+        log_diagnostic(logger, 'Failed to recover stuck jobs on startup',
+            component=COMPONENT, operation='recover_stuck_jobs', error=e,
+            hint='Recovery failed but worker will still start. Stuck jobs may remain in processing state.')
 
     # 2. Start thread
     worker_running = True
     worker_thread = threading.Thread(target=scrape_worker, daemon=True, name="ScrapeWorker")
     worker_thread.start()
-    logger.info("✅ Scraping worker thread initialized")
+    slog(logger, 'info', 'Scraping worker thread initialized', component=COMPONENT,
+         operation='thread_init', pid=os.getpid())
 
 
 _worker_init_done = False

@@ -128,3 +128,70 @@ def log_error_state(logger, error, context_data=None):
         payload["input_dto"] = context_data
         
     logger.error("Operation failed", extra=payload, exc_info=True)
+
+
+def slog(logger_instance, level, message, component, operation=None, **context):
+    """
+    Structured log helper for LLM-friendly output.
+    
+    Every log entry gets a `component` tag for filtering/routing.
+    Additional context fields are passed as structured data via TOON.
+    
+    Usage:
+        slog(logger, 'info', 'Matches discovered', component='pipeline',
+             operation='discover', round=1, total_matches=10)
+    
+    Output (TOON):
+        level: INFO
+        name: scripts.run_batch
+        message: Matches discovered
+        component: pipeline
+        operation: discover
+        round: 1
+        total_matches: 10
+    """
+    extra = {"component": component}
+    if operation:
+        extra["operation"] = operation
+    extra.update(context)
+    
+    log_method = getattr(logger_instance, level.lower(), logger_instance.info)
+    log_method(message, extra=extra)
+
+
+def log_diagnostic(logger_instance, message, component, operation, 
+                   error=None, hint=None, expected=None, actual=None, **context):
+    """
+    LLM Debug Packet: rich structured error context for automated diagnosis.
+    
+    Includes expected vs actual values and human-readable hints so an LLM
+    can diagnose the issue from logs alone without reading source code.
+    
+    Usage:
+        log_diagnostic(logger, "No finished matches found",
+            component="crawler", operation="check_results",
+            expected="td.result a elements > 0",
+            actual="0 elements found",
+            hint="Page loaded but no result links. Possible: round not started, CSS changed, anti-bot",
+            url=url, selector="#fixture_games td.result a")
+    """
+    extra = {
+        "component": component,
+        "operation": operation,
+    }
+    
+    if hint:
+        extra["hint"] = hint
+    if expected:
+        extra["expected"] = expected
+    if actual:
+        extra["actual"] = actual
+    
+    extra.update(context)
+    
+    if error:
+        extra["error_type"] = type(error).__name__
+        extra["error_message"] = str(error)
+        logger_instance.error(message, extra=extra, exc_info=True)
+    else:
+        logger_instance.warning(message, extra=extra)

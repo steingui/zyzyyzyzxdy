@@ -26,9 +26,11 @@ load_dotenv()
 # Configuração de logging
 # Configuração de Logs (RFC 005)
 sys.path.append(os.getcwd())
-from app.utils.logger import get_logger
+from app.utils.logger import get_logger, slog, log_diagnostic
 
 logger = get_logger(__name__)
+
+COMPONENT = "db_importer"
 
 
 def get_or_create_season(cursor, league_slug: str, year: int) -> int:
@@ -83,14 +85,20 @@ def get_connection():
     database_url = os.getenv('DATABASE_URL')
     
     if not database_url:
-        logger.error("DATABASE_URL não definida. Configure a variável de ambiente.")
+        log_diagnostic(logger, 'DATABASE_URL not configured',
+            component=COMPONENT, operation='connect',
+            expected='DATABASE_URL environment variable set',
+            actual='Variable is empty or missing',
+            hint='Set DATABASE_URL in .env or Render environment. Format: postgresql://user:pass@host:5432/dbname')
         sys.exit(1)
     
     try:
         conn = psycopg2.connect(database_url, cursor_factory=RealDictCursor)
         return conn
     except psycopg2.Error as e:
-        logger.error(f"Erro ao conectar ao PostgreSQL: {e}")
+        log_diagnostic(logger, 'Failed to connect to PostgreSQL',
+            component=COMPONENT, operation='connect', error=e,
+            hint='Check DATABASE_URL format and ensure the database is reachable. If on Render, verify the DB service is running.')
         sys.exit(1)
 
 
@@ -146,7 +154,12 @@ def validate_json(data: dict) -> bool:
     
     for field in required_fields:
         if field not in data:
-            logger.error(f"Campo obrigatório ausente: {field}")
+            log_diagnostic(logger, 'Required field missing in scraped data',
+                component=COMPONENT, operation='validate_json',
+                expected=f'Field "{field}" present in input JSON',
+                actual=f'Available fields: {list(data.keys())[:10]}',
+                hint=f'The scraper did not return "{field}". Check scraper extraction logic.',
+                missing_field=field)
             return False
     
     return True
@@ -409,7 +422,10 @@ def process_input(data: dict, league_slug: str, year: int) -> bool:
         season_id = get_or_create_season(cursor, league_slug, year)
         logger.info(f"Using season_id={season_id} for {league_slug} {year}")
     except Exception as e:
-        logger.error(f"Failed to get/create season: {e}")
+        log_diagnostic(logger, 'Failed to get/create season',
+            component=COMPONENT, operation='get_or_create_season', error=e,
+            hint='Could not find or create the season record. Ensure the league slug exists in the ligas table.',
+            league_slug=league_slug, year=year)
         conn.close()
         return False
     
@@ -467,12 +483,20 @@ def process_input(data: dict, league_slug: str, year: int) -> bool:
         
     except psycopg2.Error as e:
         conn.rollback()
-        logger.error(f"Erro PostgreSQL: {e}")
+        log_diagnostic(logger, 'PostgreSQL error during import',
+            component=COMPONENT, operation='process_input', error=e,
+            hint='SQL error during data persistence. Check constraint violations, missing columns, or connection issues.',
+            home_team=data.get('home_team'), away_team=data.get('away_team'),
+            rodada=data.get('rodada'))
         return False
         
     except Exception as e:
         conn.rollback()
-        logger.error(f"Erro inesperado: {e}")
+        log_diagnostic(logger, 'Unexpected error during import',
+            component=COMPONENT, operation='process_input', error=e,
+            hint='Non-SQL error during import. Could be JSON parsing, missing keys, or type conversion.',
+            home_team=data.get('home_team'), away_team=data.get('away_team'),
+            rodada=data.get('rodada'))
         return False
         
     finally:
@@ -490,13 +514,20 @@ def main():
         raw_input = sys.stdin.read().strip()
         
         if not raw_input:
-            logger.error("Nenhum dado recebido via stdin")
+            log_diagnostic(logger, 'No data received via stdin',
+                component=COMPONENT, operation='read_input',
+                expected='JSON data piped to stdin',
+                actual='Empty stdin',
+                hint='The script expects JSON via pipe: python3 run_batch.py | python3 db_importer.py')
             sys.exit(1)
         
         data = json.loads(raw_input)
         
     except json.JSONDecodeError as e:
-        logger.error(f"JSON inválido: {e}")
+        log_diagnostic(logger, 'Invalid JSON received via stdin',
+            component=COMPONENT, operation='parse_input', error=e,
+            hint='The input from stdin is not valid JSON. Check the upstream pipeline output.',
+            raw_input_preview=raw_input[:200] if raw_input else 'empty')
         sys.exit(1)
     
     import argparse

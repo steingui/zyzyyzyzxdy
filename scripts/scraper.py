@@ -64,8 +64,10 @@ LOG_DIR.mkdir(exist_ok=True)
 LOG_TIMESTAMP = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
 
 # Configuração de Logs (RFC 005)
-from app.utils.logger import get_logger
+from app.utils.logger import get_logger, slog, log_diagnostic
 logger = get_logger(__name__)
+
+COMPONENT = "scraper"
 
 
 class OgolScraper:
@@ -163,7 +165,9 @@ class OgolScraper:
         try:
             self._validate_page_structure(page)
         except InvalidDOMError as e:
-            logger.warning(f"DOM Validation failed on first load: {e}. Attempting scrolls...")
+            slog(logger, 'warning', 'DOM validation failed on first load, attempting scrolls',
+                 component=COMPONENT, operation='validate_dom',
+                 url=url, error_message=str(e))
             # Maybe it needs scrolling to load? Continue to scrolls logic and validate again?
             # Or fail fast?
             # User wants "100% efficient", so maybe fail explicitly?
@@ -247,7 +251,15 @@ class OgolScraper:
             if detailed_stats:
                 self.data.update(detailed_stats)
         
-        logger.info(f"Scraping concluído: {self.data.get('home_team', '?')} x {self.data.get('away_team', '?')}")
+        slog(logger, 'info', 'Scraping completed for match', component=COMPONENT,
+             operation='extract_complete', url=url,
+             home_team=self.data.get('home_team'),
+             away_team=self.data.get('away_team'),
+             home_score=self.data.get('home_score'),
+             away_score=self.data.get('away_score'),
+             has_stats='stats_home' in self.data,
+             has_lineups='escalacao_casa' in self.data,
+             has_events='eventos' in self.data)
         
         # Unificar dados de jogadores para evitar redundância
         self.data = merge_player_data(self.data)
@@ -264,7 +276,9 @@ class OgolScraper:
         Returns:
             Dicionário com todos os dados extraídos
         """
-        logger.info(f"Iniciando scraping: {url}")
+        slog(logger, 'info', 'Starting match scrape', component=COMPONENT,
+             operation='scrape_start', url=url,
+             headless=self.headless, detailed=self.detailed)
         
         # [NEW] Get proxy
         proxy_config = self.proxy_manager.get_proxy()
@@ -291,7 +305,11 @@ class OgolScraper:
                 self._execute_scrape_logic(page, url)
                 
             except Exception as e:
-                logger.error(f"Erro fatal no scraping após retries: {e}")
+                log_diagnostic(logger, 'Fatal scraping error after retries',
+                    component=COMPONENT, operation='scrape_fatal',
+                    error=e,
+                    hint='All retry attempts failed. Possible causes: (1) anti-bot detection, (2) page structure changed, (3) network issues on Render',
+                    url=url)
                 
             finally:
                 browser.close()
@@ -318,7 +336,12 @@ def main() -> None:
     
     # Validação mínima flexível
     if not data.get('home_team') or not data.get('away_team'):
-        logger.error("Não foi possível extrair informações básicas da partida")
+        log_diagnostic(logger, 'Failed to extract basic match info',
+            component=COMPONENT, operation='validate_output',
+            expected='home_team and away_team present in scraped data',
+            actual=f'home_team={data.get("home_team")}, away_team={data.get("away_team")}',
+            hint='Scraper returned data but critical fields are missing. The page DOM may have changed.',
+            url=url if len(sys.argv) > 1 else 'N/A')
         sys.exit(1)
     
     # Output JSON
