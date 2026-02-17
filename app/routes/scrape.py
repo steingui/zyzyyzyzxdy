@@ -30,8 +30,7 @@ logger = get_logger(__name__)
 COMPONENT = "worker"
 
 # Redis Configuration
-REDIS_URL = os.getenv('REDIS_URL', os.getenv('CACHE_REDIS_URL', 'redis://localhost:6379/0'))
-redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+from app.database.redis import redis_client
 
 # Redis Keys
 KEY_QUEUE = "scrape:queue"

@@ -163,6 +163,8 @@ class Partida(db.Model):
         # RFC Optimization Indexes
         Index('idx_partidas_season_round', 'temporada_id', 'rodada'),
         Index('idx_partidas_teams', 'time_casa_id', 'time_fora_id'),
+        # RFC 001 Strict Filter Index
+        Index('idx_partidas_strict_filter', 'liga_id', 'ano', 'rodada'),
         # Uniqueness
         db.UniqueConstraint('temporada_id', 'rodada', 'time_casa_id', 'time_fora_id', name='partida_unica'),
     )
