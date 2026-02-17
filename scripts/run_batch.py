@@ -83,7 +83,9 @@ def log_with_context(level, message, **context):
     log_method(message, extra=extra_record.__dict__)
 
 def get_matches(league_slug: str, year: int, force_round: int = None):
-    """Calcula próxima rodada (ou usa forçada) e chama o crawler."""
+    """Calcula próxima rodada (ou usa forçada) e chama o crawler diretamente."""
+    from scripts.crawl_round import get_round_matches
+    
     if force_round:
         next_round = force_round
         logger.info(f"MODO MANUAL: Forçando busca da rodada: {next_round}")
@@ -93,28 +95,16 @@ def get_matches(league_slug: str, year: int, force_round: int = None):
         logger.info(f"Última rodada no banco: {last_round}. Buscando rodada: {next_round}")
     
     try:
-        cmd = [
-            sys.executable, str(SCRIPTS_DIR / "crawl_round.py"),
-            "--round", str(next_round),
-            "--league", league_slug
-        ]
-        result = subprocess.run(
-            cmd,
-            capture_output=True, text=True, check=True
-        )
-        # O crawler imprime logs no stderr e JSON no stdout
-        urls = json.loads(result.stdout)
+        urls = get_round_matches(league_slug=league_slug, round_num=next_round)
         
         if not urls:
             logger.warning(f"Rodada {next_round} não tem jogos disponíveis ou prontos.")
             return []
             
+        logger.info(f"✅ Crawler encontrou {len(urls)} jogos na rodada {next_round}")
         return urls
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Falha ao buscar jogos: {e.stderr}")
-        return []
-    except json.JSONDecodeError:
-        logger.error(f"Saída inválida do crawler: {result.stdout}")
+    except Exception as e:
+        logger.error(f"❌ Falha ao buscar jogos da rodada {next_round}: {e}", exc_info=True)
         return []
 
 def scrape_match(url, index, total):
