@@ -74,6 +74,7 @@ def create_browser_context(
         from playwright_stealth import stealth_sync
         page = context.new_page()
         stealth_sync(page)
+        logger.info("Playwright-Stealth applied successfully")
     except ImportError:
         logger.warning("playwright-stealth not installed, running without it")
         page = context.new_page()
@@ -120,6 +121,23 @@ def _is_cloudflare_challenge(page: Page) -> bool:
         return True
 
 
+def simulate_human_side_effects(page: Page):
+    """Perform random mouse movements and scrolls to look human."""
+    import random
+    try:
+        # Random mouse move
+        x = random.randint(100, 800)
+        y = random.randint(100, 600)
+        page.mouse.move(x, y, steps=5)
+        
+        # Occasional scroll
+        if random.random() < 0.3:
+            page.mouse.wheel(0, random.randint(100, 500))
+            
+    except Exception:
+        pass
+
+
 def wait_for_cloudflare(page: Page, timeout: int = 30, poll_interval: float = 2.0) -> bool:
     """
     Wait for a Cloudflare JS challenge to resolve.
@@ -136,6 +154,10 @@ def wait_for_cloudflare(page: Page, timeout: int = 30, poll_interval: float = 2.
 
     start = time.time()
     while time.time() - start < timeout:
+        
+        # ACT LIKE A HUMAN while waiting
+        simulate_human_side_effects(page)
+        
         time.sleep(poll_interval)
         
         # Debug log for waiting
