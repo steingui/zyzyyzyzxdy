@@ -249,15 +249,16 @@ def start_worker():
     logger.info("✅ Scraping worker thread initialized")
 
 
+_worker_init_done = False
+
 @scrape_bp.before_app_request
 def _ensure_worker_started():
     """Lazily start the worker on first request instead of on module import."""
+    global _worker_init_done
+    if _worker_init_done:
+        return
+    _worker_init_done = True
     start_worker()
-    # Remove itself after first invocation to avoid overhead on every request
-    scrape_bp.before_app_request_funcs[None] = [
-        f for f in scrape_bp.before_app_request_funcs.get(None, [])
-        if f is not _ensure_worker_started
-    ]
 
 @scrape_bp.route('', methods=['POST'])
 def start_scrape():
