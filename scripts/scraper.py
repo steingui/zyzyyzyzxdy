@@ -149,9 +149,16 @@ class OgolScraper:
     )
     def _execute_scrape_logic(self, page, url: str):
         """Core logic with retry support"""
+        from scripts.utils.cloudflare import wait_for_cloudflare
+        
         # Carregar página e aguardar conteúdo inicial
         start_time = time.time()
         page.goto(url, wait_until='domcontentloaded', timeout=NAVIGATION_TIMEOUT)
+        
+        # Wait for Cloudflare challenge to resolve (if present)
+        cf_resolved = wait_for_cloudflare(page, timeout=30)
+        if not cf_resolved:
+            raise InvalidDOMError(f"Cloudflare challenge did not resolve for {url}")
         
         # Adaptive Throttle: sleep proportional to server response time
         response_time = time.time() - start_time

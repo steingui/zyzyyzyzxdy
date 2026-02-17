@@ -24,7 +24,7 @@ OGOL_BASE_URL = "https://www.ogol.com.br"
 # BROWSER CONFIG
 # =============================================================================
 # User-Agent moderno (Chrome 122 on Windows 10) para parecer usuário real
-USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 VIEWPORT = {'width': 1920, 'height': 1080}
 
 # Headers extras para evitar detecção
