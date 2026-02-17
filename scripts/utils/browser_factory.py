@@ -75,6 +75,57 @@ def create_browser_context(
         page = context.new_page()
         stealth_sync(page)
         logger.info("Playwright-Stealth applied successfully")
+        
+        # LOG DIAGNOSTICS
+        try:
+            # 1. Basic Props
+            ua = page.evaluate("navigator.userAgent")
+            webdriver = page.evaluate("navigator.webdriver")
+            
+            # 2. Viewport & Screen
+            viewport = page.evaluate("`${window.innerWidth}x${window.innerHeight}`")
+            screen = page.evaluate("`${window.screen.width}x${window.screen.height}`")
+            
+            # 3. Timezone & Locale
+            timezone = page.evaluate("Intl.DateTimeFormat().resolvedOptions().timeZone")
+            locale = page.evaluate("navigator.language")
+            
+            # 4. WebGL (Critical for Headless Detection)
+            webgl = page.evaluate("""() => {
+                try {
+                    const canvas = document.createElement('canvas');
+                    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                    if (!gl) return 'No WebGL';
+                    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+                    if (!debugInfo) return 'No Debug Info';
+                    return gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) + ' | ' + gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                } catch(e) { return 'Error: ' + e.toString(); }
+            }""")
+            
+            # 5. Plugins
+            plugins_len = page.evaluate("navigator.plugins.length")
+
+            logger.info("--- BROWSER FINGERPRINT DIAGNOSTICS ---")
+            logger.info(f"UA: {ua}")
+            logger.info(f"Webdriver: {webdriver}")
+            logger.info(f"Viewport: {viewport} (Screen: {screen})")
+            logger.info(f"Timezone: {timezone} | Locale: {locale}")
+            logger.info(f"WebGL: {webgl}")
+            logger.info(f"Plugins: {plugins_len}")
+            
+            # Check IP to validate environment difference
+            try:
+                page.goto("https://api.ipify.org?format=json", timeout=10000)
+                content = page.content()
+                logger.info(f"Public IP: {content}")
+            except Exception as ip_err:
+                logger.warning(f"Failed to check public IP: {ip_err}")
+                
+            logger.info("---------------------------------------")
+                
+        except Exception as e:
+            logger.warning(f"Failed to log diagnostics: {e}")
+
     except ImportError:
         logger.warning("playwright-stealth not installed, running without it")
         page = context.new_page()
