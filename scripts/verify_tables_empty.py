@@ -1,6 +1,6 @@
 import sys
 import os
-from sqlalchemy import text
+from sqlalchemy import MetaData, Table, func
 
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -27,7 +27,8 @@ def verify_tables_empty():
             if table == 'alembic_version':
                 continue
                 
-            count = db.session.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar()
+            tbl = Table(table, MetaData(), autoload_with=db.engine)
+            count = db.session.query(func.count()).select_from(tbl).scalar()
             
             if count == 0:
                 print(f"✅ {table}: 0 rows")
