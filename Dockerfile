@@ -29,4 +29,6 @@ ENV PYTHONPATH=/app
 EXPOSE 8000
 
 # Start Gunicorn
+# Run as an unprivileged user (added by Panoptes)
+USER 10001:10001
 CMD ["gunicorn", "api_app:app", "--bind", "0.0.0.0:8000", "--timeout", "120", "--workers", "1"]
