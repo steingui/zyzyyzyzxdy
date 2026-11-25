@@ -28,6 +28,9 @@ ENV PYTHONPATH=/app
 # Expose port (Render sets PORT env var)
 EXPOSE 8000
 
+# Health check (TCP probe against the gunicorn listener)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD ["python", "-c", "import socket; s = socket.create_connection(('127.0.0.1', 8000), 5); s.close()"]
+
 # Start Gunicorn
 # Run as an unprivileged user (added by Panoptes)
 USER 10001:10001
